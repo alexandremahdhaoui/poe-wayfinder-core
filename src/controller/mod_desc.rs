@@ -1,0 +1,658 @@
+//! Reading modifier metadata out of item text.
+//!
+//! Ported from `renderer/src/parser/advanced-mod-desc.ts`.
+//!
+//! # Two ways the game tells you a modifier's type
+//!
+//! With Advanced Item Description off, the game appends a suffix to the stat
+//! line itself.
+//!
+//! ```text
+//! +25 to maximum Life (implicit)
+//! ```
+//!
+//! With it on, the game prints a metadata line in braces above the stat lines
+//! it describes.
+//!
+//! ```text
+//! {Prefix Modifier "Rotund" (Tier: 3) — Life}
+//! +25 to maximum Life
+//! ```
+//!
+//! Both forms are supported. The suffix form is the fallback, and it carries
+//! far less information, which is why the app should tell a user to turn
+//! Advanced Item Description on.
+
+use crate::types::client_strings as cs;
+use crate::types::modifier::{Generation, ModifierInfo, ModifierType};
+use crate::util::number::leading_float;
+
+/// The em dash the game uses to separate metadata fields.
+///
+/// U+2014 and not a hyphen. A hyphen here would never match and every tag
+/// would silently disappear.
+const FIELD_SEPARATOR: char = '\u{2014}';
+
+/// Whether a line is a metadata line rather than a stat line.
+pub fn is_mod_info_line(line: &str) -> bool {
+    line.starts_with('{') && line.ends_with('}')
+}
+
+/// One modifier and the stat lines beneath it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupedMod {
+    pub mod_line: String,
+    pub stat_lines: Vec<String>,
+}
+
+/// Split a section into one group per metadata line.
+///
+/// Returns nothing when the first line is not a metadata line, because then
+/// the section is in the suffix form and this grouping does not apply.
+pub fn group_lines_by_mod(lines: &[String]) -> Vec<GroupedMod> {
+    if lines.first().is_none_or(|l| !is_mod_info_line(l)) {
+        return Vec::new();
+    }
+
+    let mut out: Vec<GroupedMod> = Vec::new();
+
+    for line in lines {
+        if is_mod_info_line(line) {
+            out.push(GroupedMod {
+                mod_line: line.clone(),
+                stat_lines: Vec::new(),
+            });
+        } else if let Some(last) = out.last_mut() {
+            last.stat_lines.push(line.clone());
+        }
+    }
+
+    out
+}
+
+/// Strip a suffix from every line that carries it.
+pub fn remove_lines_ending(lines: &[String], ending: &str) -> Vec<String> {
+    lines
+        .iter()
+        .map(|l| l.strip_suffix(ending).unwrap_or(l).to_string())
+        .collect()
+}
+
+/// Work out a section's modifier type from its line suffixes.
+///
+/// The order matters and is the reference's. A line can only carry one suffix,
+/// but a section can mix types, and the first match wins for the whole
+/// section.
+pub fn parse_mod_type(lines: &[String]) -> (ModifierType, Vec<String>) {
+    if lines
+        .first()
+        .is_some_and(|l| l == cs::VEILED_PREFIX || l == cs::VEILED_SUFFIX)
+    {
+        return (ModifierType::Veiled, lines.to_vec());
+    }
+
+    // Checked in the reference's order. Explicit has no suffix and is the
+    // fallback.
+    let ordered = [
+        ModifierType::Scourge,
+        ModifierType::Enchant,
+        ModifierType::Implicit,
+        ModifierType::Fractured,
+        ModifierType::Crafted,
+        ModifierType::Augment,
+        ModifierType::AddedAugment,
+        ModifierType::Desecrated,
+    ];
+
+    for kind in ordered {
+        let Some(suffix) = kind.line_suffix() else {
+            continue;
+        };
+
+        if lines.iter().any(|l| l.ends_with(suffix)) {
+            return (kind, remove_lines_ending(lines, suffix));
+        }
+    }
+
+    (ModifierType::Explicit, lines.to_vec())
+}
+
+/// Read one `{...}` metadata line.
+///
+/// `kind` is what the line suffixes already said. This function can override
+/// it, because the metadata line is more specific. A `Master Crafted` prefix
+/// on an otherwise explicit section makes the whole modifier crafted.
+pub fn parse_mod_info_line(line: &str, kind: ModifierType) -> ModifierInfo {
+    let inner = line
+        .strip_prefix('{')
+        .and_then(|l| l.strip_suffix('}'))
+        .unwrap_or(line);
+
+    let mut fields = inner.split(FIELD_SEPARATOR).map(str::trim);
+
+    let head = fields.next().unwrap_or("");
+    let second = fields.next();
+    let third = fields.next();
+
+    let mut info = ModifierInfo {
+        kind: Some(kind),
+        ..ModifierInfo::default()
+    };
+
+    if let Some(rank) = eldritch_rank(head) {
+        info.generation = Some(Generation::Eldritch);
+        info.rank = Some(rank);
+    } else {
+        read_head(head, &mut info);
+    }
+
+    // The third field is always the roll increase. The second is the roll
+    // increase only when there is no third and it looks like one, otherwise it
+    // is the tag list.
+    let incr_text = match (second, third) {
+        (_, Some(third)) => Some(third),
+        (Some(second), None) if parse_increased(second).is_some() => Some(second),
+        _ => None,
+    };
+
+    let tags_text = match (second, incr_text) {
+        (Some(second), Some(incr)) if second == incr => None,
+        (Some(second), _) => Some(second),
+        _ => None,
+    };
+
+    info.tags = tags_text
+        .map(|t| t.split(", ").map(str::to_string).collect())
+        .unwrap_or_default();
+    info.roll_incr = incr_text.and_then(parse_increased);
+
+    info
+}
+
+/// Read the first metadata field.
+///
+/// It holds the modifier's type word, then an optional quoted name, then an
+/// optional tier and rank.
+fn read_head(head: &str, info: &mut ModifierInfo) {
+    let (type_word, rest) = split_type_word(head);
+
+    // A fractured or desecrated or crafted marker prefixes the type word and
+    // overrides the section's type. Fractured wins over the other two.
+    let mut type_word = type_word;
+
+    if let Some(stripped) = type_word.strip_prefix(cs::FRACTURED_MODIFIER) {
+        type_word = stripped.trim();
+        info.kind = Some(ModifierType::Fractured);
+    } else if let Some(stripped) = type_word.strip_prefix(cs::DESECRATED_MODIFIER) {
+        type_word = stripped.trim();
+
+        if info.kind != Some(ModifierType::Fractured) {
+            info.kind = Some(ModifierType::Desecrated);
+        }
+    } else if let Some(stripped) = type_word.strip_prefix(cs::CRAFTED_MODIFIER) {
+        type_word = stripped.trim();
+
+        if info.kind != Some(ModifierType::Fractured) {
+            info.kind = Some(ModifierType::Crafted);
+        }
+    }
+
+    match type_word {
+        cs::PREFIX_MODIFIER => info.generation = Some(Generation::Prefix),
+        cs::SUFFIX_MODIFIER => info.generation = Some(Generation::Suffix),
+        cs::CORRUPTED_IMPLICIT => {
+            info.generation = Some(Generation::Corrupted);
+            info.kind = Some(ModifierType::Enchant);
+        }
+        cs::IMPLICIT_MODIFIER => info.kind = Some(ModifierType::Implicit),
+        cs::VAAL_UNIQUE_MODIFIER => info.generation = Some(Generation::Mutated),
+        _ => {}
+    }
+
+    info.name = read_quoted_name(head);
+    info.tier = read_parenthesised(rest, "Tier");
+    info.rank = read_parenthesised(rest, "Rank");
+}
+
+/// Split the head into its type word and everything after it.
+///
+/// The type word ends at the first quote or opening parenthesis.
+fn split_type_word(head: &str) -> (&str, &str) {
+    let end = head.find(['"', '(']).unwrap_or(head.len());
+
+    (head[..end].trim(), &head[end..])
+}
+
+/// Read the quoted modifier name.
+///
+/// An empty quoted name reads as absent, matching the reference, because the
+/// game prints `""` when it has no name to give.
+fn read_quoted_name(head: &str) -> Option<String> {
+    let start = head.find('"')? + 1;
+    let end = start + head[start..].find('"')?;
+    let name = &head[start..end];
+
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// Read `(Tier: 3)` or `(Rank: 2)`.
+fn read_parenthesised(text: &str, key: &str) -> Option<u32> {
+    let needle = format!("({key}:");
+    let start = text.find(&needle)? + needle.len();
+    let end = start + text[start..].find(')')?;
+
+    text[start..end].trim().parse().ok()
+}
+
+/// Read `20% Increased` into 20.
+fn parse_increased(text: &str) -> Option<f64> {
+    let value = text.trim().strip_suffix("% Increased")?;
+
+    leading_float(value)
+}
+
+/// Match an eldritch implicit head and return its rank.
+///
+/// The game prints `Eater of Worlds Implicit Modifier (Grand)`. The rank word
+/// is what matters and the ranks are ordered.
+fn eldritch_rank(head: &str) -> Option<u32> {
+    let rest = head
+        .strip_prefix("Eater of Worlds Implicit Modifier")
+        .or_else(|| head.strip_prefix("Searing Exarch Implicit Modifier"))?
+        .trim();
+
+    let word = rest.strip_prefix('(')?.strip_suffix(')')?.trim();
+
+    cs::ELDRITCH_MOD_RANKS
+        .iter()
+        .position(|&r| r == word)
+        .map(|i| i as u32 + 1)
+}
+
+/// Apply a modifier's roll increase to a value.
+///
+/// Ported from `incrRoll`. Truncates rather than rounds, matching the game and
+/// the reference. Rounding here puts the client one point above what the trade
+/// site will match.
+pub fn incr_roll(value: f64, percent: f64, decimals: u32) -> f64 {
+    let raised = value + (value * percent) / 100.0;
+    let scale = 10f64.powi(decimals as i32);
+
+    (raised * scale).trunc() / scale
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lines(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    // -----------------------------------------------------------------
+    // Grouping
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn a_metadata_line_is_recognised_by_its_braces() {
+        assert!(is_mod_info_line("{Prefix Modifier}"));
+        assert!(!is_mod_info_line("+25 to maximum Life"));
+        assert!(!is_mod_info_line("{unterminated"));
+        assert!(!is_mod_info_line("unopened}"));
+    }
+
+    #[test]
+    fn each_metadata_line_collects_the_stats_beneath_it() {
+        let got = group_lines_by_mod(&lines(&[
+            "{Prefix Modifier \"Rotund\" (Tier: 3)}",
+            "+25 to maximum Life",
+            "{Suffix Modifier \"of the Lynx\" (Tier: 1)}",
+            "+30 to Dexterity",
+            "+12% to Cold Resistance",
+        ]));
+
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].stat_lines, vec!["+25 to maximum Life"]);
+        assert_eq!(got[1].stat_lines.len(), 2);
+    }
+
+    #[test]
+    fn a_section_that_does_not_start_with_metadata_is_not_grouped() {
+        // That section is in the suffix form and this grouping does not apply.
+        let got = group_lines_by_mod(&lines(&["+25 to maximum Life", "{Prefix Modifier}"]));
+
+        assert!(got.is_empty());
+    }
+
+    #[test]
+    fn an_empty_section_is_not_grouped() {
+        assert!(group_lines_by_mod(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_metadata_line_with_no_stats_still_yields_a_group() {
+        let got = group_lines_by_mod(&lines(&["{Prefix Modifier}"]));
+
+        assert_eq!(got.len(), 1);
+        assert!(got[0].stat_lines.is_empty());
+    }
+
+    // -----------------------------------------------------------------
+    // Suffix form
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn a_line_suffix_names_the_type_and_is_stripped() {
+        let (kind, out) = parse_mod_type(&lines(&["+25 to maximum Life (implicit)"]));
+
+        assert_eq!(kind, ModifierType::Implicit);
+        assert_eq!(out, vec!["+25 to maximum Life"]);
+    }
+
+    #[test]
+    fn every_suffix_is_wired_up() {
+        for (suffix, want) in [
+            (" (scourge)", ModifierType::Scourge),
+            (" (enchant)", ModifierType::Enchant),
+            (" (implicit)", ModifierType::Implicit),
+            (" (fractured)", ModifierType::Fractured),
+            (" (crafted)", ModifierType::Crafted),
+            (" (rune)", ModifierType::Augment),
+            (" (added rune)", ModifierType::AddedAugment),
+            (" (desecrated)", ModifierType::Desecrated),
+        ] {
+            let (kind, out) = parse_mod_type(&lines(&[&format!("+25 to Life{suffix}")]));
+
+            assert_eq!(kind, want, "{suffix}");
+            assert_eq!(out, vec!["+25 to Life"], "{suffix}");
+        }
+    }
+
+    #[test]
+    fn a_section_with_no_suffix_is_explicit_and_unchanged() {
+        let (kind, out) = parse_mod_type(&lines(&["+25 to maximum Life"]));
+
+        assert_eq!(kind, ModifierType::Explicit);
+        assert_eq!(out, vec!["+25 to maximum Life"]);
+    }
+
+    #[test]
+    fn one_suffixed_line_types_the_whole_section() {
+        let (kind, out) = parse_mod_type(&lines(&[
+            "+25 to maximum Life (implicit)",
+            "+30 to Dexterity",
+        ]));
+
+        assert_eq!(kind, ModifierType::Implicit);
+        // The unsuffixed line survives untouched.
+        assert_eq!(out[1], "+30 to Dexterity");
+    }
+
+    #[test]
+    fn a_veiled_marker_beats_every_suffix() {
+        let (kind, out) = parse_mod_type(&lines(&["Desecrated Prefix", "+25 to Life (implicit)"]));
+
+        assert_eq!(kind, ModifierType::Veiled);
+        // Veiled keeps its lines verbatim, matching the reference.
+        assert_eq!(out[1], "+25 to Life (implicit)");
+    }
+
+    #[test]
+    fn the_first_matching_suffix_in_reference_order_wins() {
+        // Enchant is checked before implicit, so a section carrying both is
+        // an enchant. Reordering the list changes the answer.
+        let (kind, _) = parse_mod_type(&lines(&["A (implicit)", "B (enchant)"]));
+
+        assert_eq!(kind, ModifierType::Enchant);
+    }
+
+    #[test]
+    fn removing_a_suffix_leaves_lines_that_lack_it_alone() {
+        let got = remove_lines_ending(&lines(&["A (implicit)", "B"]), " (implicit)");
+
+        assert_eq!(got, vec!["A", "B"]);
+    }
+
+    // -----------------------------------------------------------------
+    // Metadata line
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn a_prefix_with_a_name_and_a_tier_is_read() {
+        let got = parse_mod_info_line(
+            "{Prefix Modifier \"Rotund\" (Tier: 3)}",
+            ModifierType::Explicit,
+        );
+
+        assert_eq!(got.generation, Some(Generation::Prefix));
+        assert_eq!(got.name.as_deref(), Some("Rotund"));
+        assert_eq!(got.tier, Some(3));
+        assert_eq!(got.kind, Some(ModifierType::Explicit));
+    }
+
+    #[test]
+    fn a_suffix_is_read() {
+        let got = parse_mod_info_line(
+            "{Suffix Modifier \"of the Lynx\" (Tier: 1)}",
+            ModifierType::Explicit,
+        );
+
+        assert_eq!(got.generation, Some(Generation::Suffix));
+        assert_eq!(got.name.as_deref(), Some("of the Lynx"));
+        assert_eq!(got.tier, Some(1));
+    }
+
+    #[test]
+    fn a_rank_is_read_alongside_a_tier() {
+        let got = parse_mod_info_line(
+            "{Prefix Modifier \"Rotund\" (Tier: 3) (Rank: 2)}",
+            ModifierType::Explicit,
+        );
+
+        assert_eq!(got.tier, Some(3));
+        assert_eq!(got.rank, Some(2));
+    }
+
+    #[test]
+    fn an_empty_quoted_name_reads_as_absent() {
+        // The game prints "" when it has no name to give. Keeping an empty
+        // string would make every lookup on the name fail oddly.
+        let got = parse_mod_info_line("{Implicit Modifier \"\"}", ModifierType::Explicit);
+
+        assert_eq!(got.name, None);
+    }
+
+    #[test]
+    fn a_metadata_line_with_no_name_reads_as_absent() {
+        let got = parse_mod_info_line("{Implicit Modifier}", ModifierType::Explicit);
+
+        assert_eq!(got.name, None);
+        assert_eq!(got.kind, Some(ModifierType::Implicit));
+    }
+
+    #[test]
+    fn a_crafted_marker_overrides_the_section_type() {
+        let got = parse_mod_info_line(
+            "{Master Crafted Prefix Modifier \"Upgraded\" (Tier: 1)}",
+            ModifierType::Explicit,
+        );
+
+        assert_eq!(got.kind, Some(ModifierType::Crafted));
+        assert_eq!(got.generation, Some(Generation::Prefix));
+    }
+
+    #[test]
+    fn a_fractured_marker_overrides_the_section_type() {
+        let got = parse_mod_info_line(
+            "{Fractured Prefix Modifier \"Rotund\" (Tier: 3)}",
+            ModifierType::Explicit,
+        );
+
+        assert_eq!(got.kind, Some(ModifierType::Fractured));
+        assert_eq!(got.generation, Some(Generation::Prefix));
+    }
+
+    #[test]
+    fn a_desecrated_marker_overrides_the_section_type() {
+        let got = parse_mod_info_line(
+            "{Desecrated Suffix Modifier \"of Rot\"}",
+            ModifierType::Explicit,
+        );
+
+        assert_eq!(got.kind, Some(ModifierType::Desecrated));
+        assert_eq!(got.generation, Some(Generation::Suffix));
+    }
+
+    #[test]
+    fn a_corrupted_implicit_becomes_an_enchant() {
+        // Surprising and faithful. The trade site files corrupted implicits
+        // under the enchant namespace.
+        let got = parse_mod_info_line("{Corruption Implicit Modifier}", ModifierType::Explicit);
+
+        assert_eq!(got.kind, Some(ModifierType::Enchant));
+        assert_eq!(got.generation, Some(Generation::Corrupted));
+    }
+
+    #[test]
+    fn a_vaal_unique_modifier_is_mutated() {
+        let got = parse_mod_info_line("{Vaal Unique Modifier}", ModifierType::Explicit);
+
+        assert_eq!(got.generation, Some(Generation::Mutated));
+    }
+
+    #[test]
+    fn tags_are_split_on_comma_space() {
+        let got = parse_mod_info_line(
+            "{Prefix Modifier \"Rotund\" (Tier: 3) \u{2014} Life, Defences}",
+            ModifierType::Explicit,
+        );
+
+        assert_eq!(got.tags, vec!["Life", "Defences"]);
+        assert_eq!(got.roll_incr, None);
+    }
+
+    #[test]
+    fn a_roll_increase_in_the_third_field_is_read() {
+        let got = parse_mod_info_line(
+            "{Prefix Modifier \"Rotund\" \u{2014} Life \u{2014} 20% Increased}",
+            ModifierType::Explicit,
+        );
+
+        assert_eq!(got.tags, vec!["Life"]);
+        assert_eq!(got.roll_incr, Some(20.0));
+    }
+
+    #[test]
+    fn a_roll_increase_in_the_second_field_is_not_read_as_a_tag() {
+        // With no third field the second can be either. Reading an increase as
+        // a tag would lose the scaling and price the item as unscaled.
+        let got = parse_mod_info_line(
+            "{Prefix Modifier \"Rotund\" \u{2014} 20% Increased}",
+            ModifierType::Explicit,
+        );
+
+        assert!(got.tags.is_empty());
+        assert_eq!(got.roll_incr, Some(20.0));
+    }
+
+    #[test]
+    fn a_fractional_roll_increase_is_read() {
+        let got = parse_mod_info_line(
+            "{Prefix Modifier \u{2014} 12.5% Increased}",
+            ModifierType::Explicit,
+        );
+
+        assert_eq!(got.roll_incr, Some(12.5));
+    }
+
+    #[test]
+    fn an_eldritch_implicit_reports_its_rank() {
+        for (word, rank) in [
+            ("Lesser", 1),
+            ("Greater", 2),
+            ("Grand", 3),
+            ("Exceptional", 4),
+            ("Exquisite", 5),
+            ("Perfect", 6),
+        ] {
+            let line = format!("{{Eater of Worlds Implicit Modifier ({word})}}");
+            let got = parse_mod_info_line(&line, ModifierType::Implicit);
+
+            assert_eq!(got.generation, Some(Generation::Eldritch), "{word}");
+            assert_eq!(got.rank, Some(rank), "{word}");
+        }
+    }
+
+    #[test]
+    fn a_searing_exarch_implicit_is_read_the_same_way() {
+        let got = parse_mod_info_line(
+            "{Searing Exarch Implicit Modifier (Perfect)}",
+            ModifierType::Implicit,
+        );
+
+        assert_eq!(got.generation, Some(Generation::Eldritch));
+        assert_eq!(got.rank, Some(6));
+    }
+
+    #[test]
+    fn an_unknown_eldritch_rank_word_falls_through_to_the_normal_reader() {
+        let got = parse_mod_info_line(
+            "{Eater of Worlds Implicit Modifier (Sublime)}",
+            ModifierType::Implicit,
+        );
+
+        assert_eq!(got.generation, None);
+        assert_eq!(got.rank, None);
+    }
+
+    #[test]
+    fn a_line_without_braces_is_still_read() {
+        // group_lines_by_mod only hands over braced lines, but a caller could
+        // pass one already stripped and losing the whole modifier would be
+        // worse than reading it.
+        let got = parse_mod_info_line("Prefix Modifier \"Rotund\"", ModifierType::Explicit);
+
+        assert_eq!(got.name.as_deref(), Some("Rotund"));
+    }
+
+    #[test]
+    fn an_empty_metadata_line_yields_only_the_incoming_type() {
+        let got = parse_mod_info_line("{}", ModifierType::Implicit);
+
+        assert_eq!(got.kind, Some(ModifierType::Implicit));
+        assert_eq!(got.generation, None);
+        assert_eq!(got.name, None);
+        assert!(got.tags.is_empty());
+    }
+
+    // -----------------------------------------------------------------
+    // Roll scaling
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn a_roll_increase_scales_a_whole_number() {
+        assert_eq!(incr_roll(100.0, 20.0, 0), 120.0);
+    }
+
+    #[test]
+    fn scaling_truncates_and_does_not_round() {
+        // Rounding up puts the client one point above what the trade site
+        // matches, so the search silently returns nothing.
+        assert_eq!(incr_roll(10.0, 15.0, 0), 11.0);
+    }
+
+    #[test]
+    fn scaling_keeps_the_requested_decimals() {
+        assert_eq!(incr_roll(10.0, 15.0, 2), 11.5);
+    }
+
+    #[test]
+    fn a_zero_increase_changes_nothing() {
+        assert_eq!(incr_roll(37.0, 0.0, 0), 37.0);
+    }
+
+    #[test]
+    fn scaling_a_negative_value_moves_it_further_from_zero() {
+        assert_eq!(incr_roll(-10.0, 20.0, 0), -12.0);
+    }
+}
