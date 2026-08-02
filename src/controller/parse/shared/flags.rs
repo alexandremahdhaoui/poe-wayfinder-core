@@ -442,9 +442,11 @@ mod tests {
 
     #[test]
     fn synthesised_strips_the_prefix_from_the_base_type() {
-        let mut s = state();
-        s.name = "Doom Shell".into();
-        s.base_type = Some("Synthesised Vaal Regalia".into());
+        let mut s = ParserState {
+            name: "Doom Shell".into(),
+            base_type: Some("Synthesised Vaal Regalia".into()),
+            ..ParserState::default()
+        };
 
         assert_eq!(
             parse_synthesised(&sec(&["Synthesised Item"]), &mut s),
@@ -457,8 +459,10 @@ mod tests {
 
     #[test]
     fn synthesised_strips_the_prefix_from_the_name_when_there_is_no_base_type() {
-        let mut s = state();
-        s.name = "Synthesised Vaal Regalia".into();
+        let mut s = ParserState {
+            name: "Synthesised Vaal Regalia".into(),
+            ..ParserState::default()
+        };
 
         parse_synthesised(&sec(&["Synthesised Item"]), &mut s);
 
@@ -467,8 +471,10 @@ mod tests {
 
     #[test]
     fn synthesised_leaves_a_name_that_lacks_the_prefix_alone() {
-        let mut s = state();
-        s.name = "Vaal Regalia".into();
+        let mut s = ParserState {
+            name: "Vaal Regalia".into(),
+            ..ParserState::default()
+        };
 
         parse_synthesised(&sec(&["Synthesised Item"]), &mut s);
 
@@ -478,8 +484,10 @@ mod tests {
 
     #[test]
     fn a_section_without_the_synthesised_line_is_skipped() {
-        let mut s = state();
-        s.name = "Synthesised Vaal Regalia".into();
+        let mut s = ParserState {
+            name: "Synthesised Vaal Regalia".into(),
+            ..ParserState::default()
+        };
 
         assert_eq!(
             parse_synthesised(&sec(&["Corrupted"]), &mut s),

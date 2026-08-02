@@ -254,6 +254,11 @@ pub struct BaseInfo {
     pub trade_discriminator: Option<String>,
     /// Whether the base can take crafted modifiers at all.
     pub craftable: bool,
+    /// The map tier this base always has.
+    ///
+    /// A PoE2 waystone prints no tier of its own, so the parser reads it from
+    /// here. None for everything that is not a map.
+    pub map_tier: Option<u32>,
 }
 
 /// One parsed item.

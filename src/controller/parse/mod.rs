@@ -13,12 +13,14 @@
 //! in the real pipeline. Each occurrence eats a different modifier section.
 
 pub mod nameplate;
+pub mod pipeline;
 pub mod sections;
 pub mod shared;
 
 use crate::types::item::ParsedItem;
 
 pub use nameplate::{parse_name_plate, NamePlate};
+pub use pipeline::pipeline;
 pub use sections::text_to_sections;
 
 /// What a stage did with a section.
@@ -89,6 +91,17 @@ pub struct ParserState {
     pub name: String,
     /// Line 4 of the name plate. Absent on normal items and currency.
     pub base_type: Option<String>,
+}
+
+/// Parse clipboard text for a game.
+///
+/// The one call the rest of the project needs. It picks the pipeline and runs
+/// it, so no caller has to know a pipeline exists.
+pub fn parse_clipboard(
+    clipboard: &str,
+    game: crate::types::game::GameVersion,
+) -> Result<ParsedItem, ParseError> {
+    run(clipboard, &pipeline(game))
 }
 
 /// Run a pipeline over clipboard text.

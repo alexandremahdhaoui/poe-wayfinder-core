@@ -1,6 +1,6 @@
 //! Stages that read a level, a tier or a quality.
 //!
-//! Ported from `parseItemLevel`, `parseAreaLevel`, `parseTalismanTier`,
+//! Ported from `parseItemLevel`, `parseTalismanTier`,
 //! `parseGem`, `parseQualityNested` and `parseRequirements` in
 //! `renderer/src/parser/Parser.ts`.
 
@@ -40,19 +40,6 @@ pub fn parse_item_level(section: &[String], state: &mut ParserState) -> ParseOut
     for line in section {
         if let Some(rest) = line.strip_prefix(prefix) {
             state.item.item_level = leading_int(rest).map(|v| v as u32);
-
-            return ParseOutcome::SectionParsed;
-        }
-    }
-
-    ParseOutcome::SectionSkipped
-}
-
-/// `Area Level: 83`.
-pub fn parse_area_level(section: &[String], state: &mut ParserState) -> ParseOutcome {
-    for line in section {
-        if let Some(rest) = line.strip_prefix(cs::AREA_LEVEL) {
-            state.item.area_level = leading_int(rest).map(|v| v as u32);
 
             return ParseOutcome::SectionParsed;
         }
@@ -227,15 +214,6 @@ mod tests {
             parse_item_level(&sec(&["Corrupted"]), &mut s),
             ParseOutcome::SectionSkipped
         );
-    }
-
-    #[test]
-    fn area_level_is_read() {
-        let mut s = ParserState::default();
-
-        parse_area_level(&sec(&["Area Level: 83"]), &mut s);
-
-        assert_eq!(s.item.area_level, Some(83));
     }
 
     #[test]

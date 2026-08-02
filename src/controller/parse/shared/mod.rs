@@ -4,6 +4,7 @@
 //! They live here. The game specific ones live in `poe1` and `poe2`.
 
 pub mod combat;
+pub mod content;
 pub mod flags;
 pub mod levels;
 pub mod misc;
