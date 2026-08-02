@@ -1,0 +1,42 @@
+name: poe-trader-core
+
+artifactStorePath: .forge/artifact-store.yaml
+
+# forge v0.42.0 ships no native Rust engines, so every stage wraps cargo
+# through generic-builder and generic-test-runner.
+#
+# This crate holds no config and no OpenAPI spec, so it has no codegen stage.
+# It is pure domain logic. It builds and it tests. Nothing else.
+build:
+  - name: format-code
+    src: .
+    engine: go://generic-builder
+    spec:
+      command: cargo
+      args: ["fmt", "-p", "poe-trader-core"]
+
+  - name: poe-trader-core
+    src: ./src
+    engine: go://generic-builder
+    spec:
+      command: cargo
+      args: ["build", "-p", "poe-trader-core", "--release"]
+
+test:
+  - name: lint
+    runner: go://generic-test-runner
+    spec:
+      command: cargo
+      args: ["clippy", "-p", "poe-trader-core", "--all-targets", "--", "-D", "warnings"]
+
+  - name: format-check
+    runner: go://generic-test-runner
+    spec:
+      command: cargo
+      args: ["fmt", "-p", "poe-trader-core", "--", "--check"]
+
+  - name: unit
+    runner: go://generic-test-runner
+    spec:
+      command: cargo
+      args: ["test", "-p", "poe-trader-core"]
