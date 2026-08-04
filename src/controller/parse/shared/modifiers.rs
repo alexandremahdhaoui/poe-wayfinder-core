@@ -120,6 +120,18 @@ fn read_one(
     }
 }
 
+/// How many lines one stat may span.
+///
+/// Measured against the real data: the longest multi line matcher GGG ships is
+/// three lines. Four gives a margin.
+///
+/// This is a cap and not an optimisation. Without it the scan is quadratic in
+/// the number of lines and each step joins a growing string, so a clipboard of
+/// twenty thousand lines hangs the overlay. Clipboard text is fully attacker
+/// controlled, and a freeze in a tool running alongside a game is a hang the
+/// user blames on the game.
+pub const MAX_STAT_LINES: usize = 4;
+
 /// Match every stat in a run of lines.
 ///
 /// Returns the stats it matched and the lines it could not. Reminder strings
@@ -152,9 +164,13 @@ pub fn match_stat_lines(lines: &[String], data: &dyn StatLookup) -> (Vec<ParsedS
         // Try the longest run of lines the data recognises, shortest first,
         // matching the reference. A stat spanning three lines only matches
         // when all three are offered together.
+        //
+        // The window is capped. See MAX_STAT_LINES.
         let mut matched_to = None;
 
-        for end in start..lines.len() {
+        let last = (start + MAX_STAT_LINES).min(lines.len());
+
+        for end in start..last {
             let joined = lines[start..=end].join("\n");
             let stat_string = split_unscalable_marker(&joined);
 
@@ -396,6 +412,60 @@ mod tests {
         // The suffix is stripped before the line is recorded, so a later
         // lookup against fresher data can succeed.
         assert_eq!(got.unknown[0].text, "Something New");
+    }
+
+    #[test]
+    fn the_join_window_is_capped_so_a_huge_section_cannot_hang_the_parser() {
+        // Clipboard text is fully attacker controlled. Without the cap this
+        // scan is quadratic and each step joins a growing string, so a large
+        // paste freezes the overlay.
+        let data = table(&[]);
+        let lines: Vec<String> = (0..20_000).map(|i| format!("line {i}")).collect();
+
+        let started = std::time::Instant::now();
+        let got = read_modifier_section(&lines, &data);
+
+        assert_eq!(got.unknown.len(), 20_000);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "the scan took {:?}, which means the cap is not working",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn a_stat_longer_than_the_cap_is_not_matched() {
+        // Documents the cap's cost. No stat GGG ships is this long, and the
+        // alternative is a parser that hangs on a large paste.
+        let long = (0..MAX_STAT_LINES + 1)
+            .map(|i| format!("part {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let data = table(&[&long]);
+        let lines: Vec<String> = (0..MAX_STAT_LINES + 1)
+            .map(|i| format!("part {i}"))
+            .collect();
+
+        let got = read_modifier_section(&lines, &data);
+
+        assert!(got.modifiers.is_empty());
+    }
+
+    #[test]
+    fn a_stat_exactly_at_the_cap_still_matches() {
+        let exact = (0..MAX_STAT_LINES)
+            .map(|i| format!("part {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let data = table(&[&exact]);
+        let lines: Vec<String> = (0..MAX_STAT_LINES).map(|i| format!("part {i}")).collect();
+
+        let got = read_modifier_section(&lines, &data);
+
+        assert_eq!(got.modifiers.len(), 1);
+        assert!(got.unknown.is_empty());
     }
 
     #[test]
