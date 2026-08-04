@@ -9,6 +9,9 @@
 
 use crate::adapter::data_adapter::GameData;
 use crate::controller::filter::item_filters::{build_query, FilterOptions};
+use crate::controller::filter::presets::{
+    gem_level_filter, preset_for, trials_filter, uses_item_properties, uses_modifiers,
+};
 use crate::controller::filter::stat_filters::{build_stat_group_for, StatFilterOptions};
 use crate::controller::parse::{parse_clipboard, ParseError};
 use crate::types::game::GameVersion;
@@ -78,8 +81,24 @@ pub fn price_check(
             && !item.is_modifiable(),
     };
 
-    if let Some(group) = build_stat_group_for(&item.modifiers, Some(&item), data, stats) {
-        query.stats.push(group);
+    // A gem has no modifiers and currency has none. Sending a stat group for
+    // either is an empty group, which matches everything and slows the search.
+    let preset = preset_for(&item);
+
+    if let Some(range) = gem_level_filter(&item, preset) {
+        query.filters.misc_filters.gem_level = range;
+    }
+
+    if let Some(range) = trials_filter(&item, preset) {
+        query.filters.map_filters.map_revives = range;
+    }
+
+    if uses_modifiers(preset) {
+        let properties = uses_item_properties(preset).then_some(&item);
+
+        if let Some(group) = build_stat_group_for(&item.modifiers, properties, data, stats) {
+            query.stats.push(group);
+        }
     }
 
     Ok(PriceCheck { item, query })
