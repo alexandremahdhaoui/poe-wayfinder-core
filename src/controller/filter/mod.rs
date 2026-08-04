@@ -10,6 +10,7 @@ pub mod item_property;
 pub mod presets;
 pub mod pseudo;
 pub mod rules;
+pub mod slots;
 pub mod stat_filters;
 pub mod unique;
 
