@@ -5,6 +5,7 @@
 
 pub mod combat;
 pub mod content;
+pub mod database;
 pub mod flags;
 pub mod levels;
 pub mod misc;

@@ -92,6 +92,11 @@ pub struct ParserState<'a> {
     pub name: String,
     /// Line 4 of the name plate. Absent on normal items and currency.
     pub base_type: Option<String>,
+    /// Which game this item came from.
+    ///
+    /// The data tables are per game and a PoE1 base looked up in the PoE2
+    /// table finds nothing.
+    pub game: crate::types::game::GameVersion,
     /// The stat and item tables.
     ///
     /// Carried on the state rather than passed to every stage, because only
@@ -108,6 +113,7 @@ impl std::fmt::Debug for ParserState<'_> {
             .field("item", &self.item)
             .field("name", &self.name)
             .field("base_type", &self.base_type)
+            .field("game", &self.game)
             .finish_non_exhaustive()
     }
 }
@@ -118,6 +124,7 @@ impl Default for ParserState<'_> {
             item: ParsedItem::default(),
             name: String::new(),
             base_type: None,
+            game: crate::types::game::GameVersion::Poe2,
             data: &NO_DATA,
         }
     }
@@ -132,7 +139,7 @@ pub fn parse_clipboard(
     game: crate::types::game::GameVersion,
     data: &dyn GameData,
 ) -> Result<ParsedItem, ParseError> {
-    run(clipboard, &pipeline(game), data)
+    run(clipboard, &pipeline(game), data, game)
 }
 
 /// Run a pipeline over clipboard text.
@@ -143,6 +150,7 @@ pub fn run(
     clipboard: &str,
     pipeline: &[Stage],
     data: &dyn GameData,
+    game: crate::types::game::GameVersion,
 ) -> Result<ParsedItem, ParseError> {
     let mut sections = text_to_sections(clipboard);
 
@@ -161,6 +169,7 @@ pub fn run(
         item: plate.item,
         name: plate.name,
         base_type: plate.base_type,
+        game,
         data,
     };
     state.item.raw_text = clipboard.to_string();
@@ -256,7 +265,13 @@ mod tests {
 
     #[test]
     fn the_name_plate_is_read_and_removed() {
-        let item = run(&plain_item(), &[], &NO_DATA).unwrap();
+        let item = run(
+            &plain_item(),
+            &[],
+            &NO_DATA,
+            crate::types::game::GameVersion::Poe2,
+        )
+        .unwrap();
 
         assert_eq!(item.rarity, Some(ItemRarity::Rare));
         assert_eq!(item.raw_text, plain_item());
@@ -264,7 +279,13 @@ mod tests {
 
     #[test]
     fn a_stage_sees_every_remaining_section() {
-        let item = run(&plain_item(), &[Stage::Section(count_sections)], &NO_DATA).unwrap();
+        let item = run(
+            &plain_item(),
+            &[Stage::Section(count_sections)],
+            &NO_DATA,
+            crate::types::game::GameVersion::Poe2,
+        )
+        .unwrap();
 
         assert_eq!(item.item_level, Some(2));
     }
@@ -273,7 +294,13 @@ mod tests {
     fn a_consumed_section_is_not_offered_again() {
         let pipeline = [Stage::Section(eat_first), Stage::Section(count_sections)];
 
-        let item = run(&plain_item(), &pipeline, &NO_DATA).unwrap();
+        let item = run(
+            &plain_item(),
+            &pipeline,
+            &NO_DATA,
+            crate::types::game::GameVersion::Poe2,
+        )
+        .unwrap();
 
         assert_eq!(item.item_level, Some(1));
     }
@@ -282,7 +309,13 @@ mod tests {
     fn parser_skipped_stops_that_stage_without_consuming() {
         let pipeline = [Stage::Section(bail_out), Stage::Section(count_sections)];
 
-        let item = run(&plain_item(), &pipeline, &NO_DATA).unwrap();
+        let item = run(
+            &plain_item(),
+            &pipeline,
+            &NO_DATA,
+            crate::types::game::GameVersion::Poe2,
+        )
+        .unwrap();
 
         // bail_out gave up on the first section and consumed nothing, so both
         // sections are still on offer.
@@ -300,7 +333,13 @@ mod tests {
             Stage::Section(count_sections),
         ];
 
-        let item = run(&plain_item(), &pipeline, &NO_DATA).unwrap();
+        let item = run(
+            &plain_item(),
+            &pipeline,
+            &NO_DATA,
+            crate::types::game::GameVersion::Poe2,
+        )
+        .unwrap();
 
         assert_eq!(item.item_level, None);
     }
@@ -313,7 +352,13 @@ mod tests {
             Ok(())
         }
 
-        let item = run(&plain_item(), &[Stage::Virtual(mark)], &NO_DATA).unwrap();
+        let item = run(
+            &plain_item(),
+            &[Stage::Virtual(mark)],
+            &NO_DATA,
+            crate::types::game::GameVersion::Poe2,
+        )
+        .unwrap();
 
         assert!(item.is_corrupted);
     }
@@ -325,20 +370,33 @@ mod tests {
         }
 
         assert_eq!(
-            run(&plain_item(), &[Stage::Virtual(boom)], &NO_DATA),
+            run(
+                &plain_item(),
+                &[Stage::Virtual(boom)],
+                &NO_DATA,
+                crate::types::game::GameVersion::Poe2
+            ),
             Err(ParseError::NotAnItem)
         );
     }
 
     #[test]
     fn empty_text_is_not_an_item() {
-        assert_eq!(run("", &[], &NO_DATA), Err(ParseError::NotAnItem));
+        assert_eq!(
+            run("", &[], &NO_DATA, crate::types::game::GameVersion::Poe2),
+            Err(ParseError::NotAnItem)
+        );
     }
 
     #[test]
     fn a_bad_name_plate_aborts_before_any_stage_runs() {
         assert_eq!(
-            run("Rarity: Rare\nDoom", &[], &NO_DATA),
+            run(
+                "Rarity: Rare\nDoom",
+                &[],
+                &NO_DATA,
+                crate::types::game::GameVersion::Poe2
+            ),
             Err(ParseError::BadNamePlate)
         );
     }
@@ -372,7 +430,7 @@ mod tests {
         ]
         .join("\n");
 
-        let item = run(&text, &[], &NO_DATA).unwrap();
+        let item = run(&text, &[], &NO_DATA, crate::types::game::GameVersion::Poe2).unwrap();
 
         // Without the hoist the name plate would read CANNOT_USE as the item
         // name and every later lookup would miss.

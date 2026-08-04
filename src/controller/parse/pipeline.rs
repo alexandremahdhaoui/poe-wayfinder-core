@@ -11,7 +11,7 @@
 
 use crate::types::game::GameVersion;
 
-use super::shared::{combat, content, flags, levels, misc, modifiers};
+use super::shared::{combat, content, database, flags, levels, misc, modifiers};
 use super::Stage;
 
 /// Build the stage list for a game.
@@ -34,6 +34,11 @@ fn preamble() -> Vec<Stage> {
         Stage::Virtual(content::parse_runeforged),
         Stage::Section(flags::parse_synthesised),
         Stage::Section(content::parse_category_by_help_text),
+        // The name has to be normalised before the lookup, and the lookup has
+        // to run before any stage that branches on the category or the base
+        // name. Everything in `body` does.
+        Stage::Virtual(database::normalize_name),
+        Stage::Virtual(database::find_in_database),
     ]
 }
 
@@ -156,6 +161,7 @@ mod tests {
             ]),
             &pipeline(GameVersion::Poe1),
             &NO_DATA,
+            GameVersion::Poe1,
         )
         .unwrap();
 
@@ -182,6 +188,7 @@ mod tests {
             ]),
             &pipeline(GameVersion::Poe1),
             &NO_DATA,
+            GameVersion::Poe1,
         )
         .unwrap();
 
@@ -208,7 +215,13 @@ mod tests {
             "Item Level: 70",
         ]);
 
-        let item = run(&item_text, &pipeline(GameVersion::Poe1), &NO_DATA).unwrap();
+        let item = run(
+            &item_text,
+            &pipeline(GameVersion::Poe1),
+            &NO_DATA,
+            GameVersion::Poe1,
+        )
+        .unwrap();
 
         assert!(item.is_unidentified);
         assert_eq!(item.item_level, Some(70));
@@ -231,6 +244,7 @@ mod tests {
             ]),
             &pipeline(GameVersion::Poe1),
             &NO_DATA,
+            GameVersion::Poe1,
         )
         .unwrap();
 
@@ -256,6 +270,7 @@ mod tests {
             ]),
             &pipeline(GameVersion::Poe2),
             &NO_DATA,
+            GameVersion::Poe2,
         )
         .unwrap();
 
@@ -277,6 +292,7 @@ mod tests {
             ]),
             &pipeline(GameVersion::Poe2),
             &NO_DATA,
+            GameVersion::Poe2,
         )
         .unwrap();
 
@@ -300,6 +316,7 @@ mod tests {
             ]),
             &pipeline(GameVersion::Poe1),
             &NO_DATA,
+            GameVersion::Poe1,
         )
         .unwrap();
 
@@ -323,6 +340,7 @@ mod tests {
             ]),
             &pipeline(GameVersion::Poe1),
             &NO_DATA,
+            GameVersion::Poe1,
         )
         .unwrap();
 
