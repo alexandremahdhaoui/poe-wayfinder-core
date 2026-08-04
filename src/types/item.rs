@@ -116,6 +116,17 @@ pub enum UltimatumHint {
     Deadly,
 }
 
+/// The range a base's defences can roll in.
+///
+/// Each is a min and a max. Absent means our data does not know, which is the
+/// normal case until the bundle tables are vendored.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ArmourBounds {
+    pub ar: Option<(f64, f64)>,
+    pub ev: Option<(f64, f64)>,
+    pub es: Option<(f64, f64)>,
+}
+
 /// Defensive numbers on an armour piece.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ArmourStats {
@@ -246,7 +257,7 @@ pub struct UnknownModifier {
 ///
 /// Filled from `items.ndjson` by the `GameData` lookup. Its own type rather
 /// than a borrow so a parsed item can outlive the lookup.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct BaseInfo {
     pub name: String,
     pub reference_name: String,
@@ -259,6 +270,12 @@ pub struct BaseInfo {
     /// A PoE2 waystone prints no tier of its own, so the parser reads it from
     /// here. None for everything that is not a map.
     pub map_tier: Option<u32>,
+    /// The roll ranges the base can have.
+    ///
+    /// From the game bundles and not from the trade API, so absent for most
+    /// bases today. The percentile reports nothing rather than guessing when
+    /// it is missing.
+    pub armour_bounds: ArmourBounds,
     /// The category this base belongs to.
     ///
     /// The item text names an item class, not a trade category, and the two do
@@ -317,6 +334,11 @@ pub struct ParsedItem {
     pub modifiers: Vec<crate::controller::parse::shared::modifiers::ParsedModifier>,
 
     pub unknown_modifiers: Vec<UnknownModifier>,
+
+    /// The rooms a Chronicle of Atzoatl carries.
+    ///
+    /// Empty for every other item. The rooms are what that item is worth.
+    pub atzoatl_rooms: Vec<crate::controller::parse::shared::special::AtzoatlRoom>,
 
     /// The price note the seller wrote, verbatim.
     pub note: Option<String>,

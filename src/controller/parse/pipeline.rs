@@ -11,7 +11,7 @@
 
 use crate::types::game::GameVersion;
 
-use super::shared::{combat, content, database, flags, levels, misc, modifiers};
+use super::shared::{combat, content, database, flags, levels, misc, modifiers, sockets, special};
 use super::Stage;
 
 /// Build the stage list for a game.
@@ -73,6 +73,34 @@ fn body() -> Vec<Stage> {
 /// One per modifier block the game can print: enchant, rune, implicit,
 /// granted skill and explicit. Each occurrence claims a different section,
 /// because a section is consumed at most once.
+/// Stages for named bases whose modifier block breaks the normal rules.
+///
+/// These run before the general modifier stages so a named base's odd block is
+/// claimed before the general reader can misread it. Each is gated on the base
+/// name, so an ordinary item passes straight through.
+///
+/// The logbook stage appears three times because a logbook carries three
+/// areas, each its own section.
+fn special_base_stages() -> Vec<Stage> {
+    vec![
+        Stage::Section(special::parse_mirrored_tablet),
+        Stage::Section(special::parse_filled_coffin),
+        Stage::Section(special::parse_atzoatl_rooms),
+        Stage::Section(special::parse_logbook_area),
+        Stage::Section(special::parse_logbook_area),
+        Stage::Section(special::parse_logbook_area),
+    ]
+}
+
+/// Stages that read what the modifier stages produced.
+fn derived_stages() -> Vec<Stage> {
+    vec![
+        Stage::Virtual(special::parse_fractured),
+        Stage::Virtual(special::parse_blighted_map),
+        Stage::Virtual(special::calc_base_percentile),
+    ]
+}
+
 fn modifier_stages() -> Vec<Stage> {
     (0..5)
         .map(|_| Stage::Section(modifiers::parse_modifiers))
@@ -84,7 +112,9 @@ fn poe1() -> Vec<Stage> {
     let mut out = preamble();
     out.extend(body());
     out.extend([Stage::Section(misc::parse_timelost_radius)]);
+    out.extend(special_base_stages());
     out.extend(modifier_stages());
+    out.extend(derived_stages());
 
     out
 }
@@ -109,9 +139,20 @@ fn poe2() -> Vec<Stage> {
         Stage::Section(content::parse_waystone),
         Stage::Section(content::parse_trials),
         Stage::Section(misc::parse_timelost_radius),
+        // Runes are PoE2 only. The socket line has to be claimed before the
+        // modifier stages, or it is read as an unknown modifier.
+        Stage::Section(sockets::parse_augment_sockets),
     ]);
 
+    out.extend(special_base_stages());
     out.extend(modifier_stages());
+
+    // These read what the modifier stages produced, so they run last.
+    out.extend(derived_stages());
+    out.extend([
+        Stage::Virtual(sockets::apply_augment_sockets),
+        Stage::Virtual(sockets::apply_elemental_added),
+    ]);
 
     out
 }

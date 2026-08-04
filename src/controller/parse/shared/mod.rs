@@ -10,3 +10,5 @@ pub mod flags;
 pub mod levels;
 pub mod misc;
 pub mod modifiers;
+pub mod sockets;
+pub mod special;
