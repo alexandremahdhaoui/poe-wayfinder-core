@@ -6,7 +6,9 @@
 //! this exact roll".
 
 pub mod item_filters;
+pub mod pseudo;
 pub mod stat_filters;
 
 pub use item_filters::{build_query, FilterOptions};
+pub use pseudo::{pseudo_totals, PseudoTotal};
 pub use stat_filters::{build_stat_group, StatFilterOptions};

@@ -13,6 +13,7 @@
 
 use crate::adapter::data_adapter::StatLookup;
 use crate::controller::aggregate::sum_stats_by_type;
+use crate::controller::filter::pseudo::pseudo_totals;
 use crate::controller::parse::shared::modifiers::ParsedModifier;
 use crate::types::modifier::ModifierType;
 use crate::types::query::{Range, StatFilter, StatGroup};
@@ -55,7 +56,41 @@ pub fn build_stat_group(
 ) -> Option<StatGroup> {
     let mut filters = Vec::new();
 
-    for total in sum_stats_by_type(modifiers) {
+    let totals = sum_stats_by_type(modifiers);
+
+    // Pseudo totals first. They are what almost every real search is about,
+    // and the panel shows filters in the order they arrive.
+    for pseudo in pseudo_totals(&totals) {
+        let Some(hit) = data.stat_by_matcher(pseudo.reference) else {
+            // Our stat table is older than the pseudo rules. Skipping is
+            // right: sending a filter with no trade id fails the whole query.
+            continue;
+        };
+
+        let Some(ids) = hit.stat.trade.ids_for(ModifierType::Pseudo) else {
+            continue;
+        };
+
+        let Some(id) = ids.first() else {
+            continue;
+        };
+
+        let mut filter = StatFilter::range(id, Range::default());
+        // A pseudo total's own rule decides, not the caller's enable_all.
+        // Turning every pseudo on at once returns the one listing that is this
+        // exact item.
+        filter.disabled = pseudo.disabled && !options.enable_all;
+        filter.range = bound_for(
+            pseudo.roll,
+            hit.stat.better,
+            hit.stat.trade.inverted,
+            options,
+        );
+
+        filters.push(filter);
+    }
+
+    for total in totals {
         // The lookup is by the literal form the game printed, so the matched
         // text is carried back from the modifier that produced the reference.
         let Some(matched) = matched_text(modifiers, &total.reference) else {
