@@ -5,6 +5,7 @@
 //! result reads as "this item is worthless" when it means "nobody else has
 //! this exact roll".
 
+pub mod brackets;
 pub mod item_filters;
 pub mod item_property;
 pub mod presets;
