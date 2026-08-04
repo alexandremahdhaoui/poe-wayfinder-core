@@ -12,6 +12,7 @@
 //! out, ready to click.
 
 use crate::adapter::data_adapter::StatLookup;
+use crate::controller::aggregate::sum_stats_by_type;
 use crate::controller::parse::shared::modifiers::ParsedModifier;
 use crate::types::modifier::ModifierType;
 use crate::types::query::{Range, StatFilter, StatGroup};
@@ -40,6 +41,11 @@ impl Default for StatFilterOptions {
 
 /// Build one stat group from an item's modifiers.
 ///
+/// Stats are totalled across every modifier that grants them before a filter
+/// is built. A ring with life on a prefix and life from a craft has one life
+/// filter for the total, not two filters for the halves. Filtering on either
+/// half finds almost nothing, because the split across modifiers is random.
+///
 /// Returns nothing when no modifier maps to a trade id, because an empty group
 /// is a filter that matches everything and only slows the search.
 pub fn build_stat_group(
@@ -49,18 +55,18 @@ pub fn build_stat_group(
 ) -> Option<StatGroup> {
     let mut filters = Vec::new();
 
-    for modifier in modifiers {
-        let Some(kind) = modifier.info.kind else {
+    for total in sum_stats_by_type(modifiers) {
+        // The lookup is by the literal form the game printed, so the matched
+        // text is carried back from the modifier that produced the reference.
+        let Some(matched) = matched_text(modifiers, &total.reference) else {
             continue;
         };
 
-        for stat in &modifier.stats {
-            let Some(filter) = build_one(&stat.matched, stat.roll, kind, data, options) else {
-                continue;
-            };
+        let Some(filter) = build_one(&matched, total.roll, total.kind, data, options) else {
+            continue;
+        };
 
-            filters.push(filter);
-        }
+        filters.push(filter);
     }
 
     if filters.is_empty() {
@@ -71,6 +77,19 @@ pub fn build_stat_group(
         filters,
         ..StatGroup::all(Vec::new())
     })
+}
+
+/// The literal form the game printed for a stat.
+///
+/// The total carries the canonical reference. The data lookup is keyed by the
+/// literal form, so the first modifier that produced this reference supplies
+/// it.
+fn matched_text(modifiers: &[ParsedModifier], reference: &str) -> Option<String> {
+    modifiers
+        .iter()
+        .flat_map(|m| &m.stats)
+        .find(|s| s.reference == reference)
+        .map(|s| s.matched.clone())
 }
 
 /// Build one stat filter.
@@ -555,6 +574,23 @@ mod tests {
     fn an_item_with_no_modifiers_yields_no_group() {
         // An empty group matches everything and only slows the search.
         assert!(build_stat_group(&[], &life_table(), StatFilterOptions::default()).is_none());
+    }
+
+    #[test]
+    fn two_modifiers_of_one_stat_become_one_filter_on_the_total() {
+        // A ring with life on a prefix and life from a craft has 35 life. Two
+        // filters for 20 and 15 find almost nothing, because the split across
+        // modifiers is random.
+        let mods = vec![
+            modifier(ModifierType::Explicit, "# to maximum Life", roll(20.0)),
+            modifier(ModifierType::Crafted, "# to maximum Life", roll(15.0)),
+        ];
+
+        let group = build_stat_group(&mods, &life_table(), StatFilterOptions::default()).unwrap();
+
+        assert_eq!(group.filters.len(), 1);
+        // 35 minus ten percent.
+        assert_eq!(group.filters[0].range.min, Some(31.5));
     }
 
     #[test]

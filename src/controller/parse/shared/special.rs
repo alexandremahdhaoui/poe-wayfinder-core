@@ -16,7 +16,7 @@ use crate::controller::stat_match::placeholder::StatString;
 use crate::controller::stat_match::resolve::try_parse_translation;
 use crate::types::category::ItemCategory;
 use crate::types::client_strings as cs;
-use crate::types::item::{ItemRarity, MapBlighted, UnknownModifier};
+use crate::types::item::{MapBlighted, UnknownModifier};
 use crate::types::modifier::{ModifierInfo, ModifierType};
 
 use super::modifiers::ParsedModifier;

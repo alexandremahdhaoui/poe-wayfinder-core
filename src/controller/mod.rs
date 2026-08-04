@@ -1,5 +1,6 @@
 //! Business logic. Parsing, filtering and pricing.
 
+pub mod aggregate;
 pub mod calc;
 pub mod filter;
 pub mod mod_desc;
