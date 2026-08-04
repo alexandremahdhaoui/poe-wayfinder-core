@@ -11,6 +11,7 @@ pub mod presets;
 pub mod pseudo;
 pub mod rules;
 pub mod stat_filters;
+pub mod unique;
 
 pub use item_filters::{build_query, FilterOptions};
 pub use pseudo::{pseudo_totals, PseudoTotal};
