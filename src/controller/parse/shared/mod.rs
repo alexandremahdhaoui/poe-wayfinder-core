@@ -8,3 +8,4 @@ pub mod content;
 pub mod flags;
 pub mod levels;
 pub mod misc;
+pub mod modifiers;

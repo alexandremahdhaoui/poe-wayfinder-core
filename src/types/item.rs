@@ -259,6 +259,12 @@ pub struct BaseInfo {
     /// A PoE2 waystone prints no tier of its own, so the parser reads it from
     /// here. None for everything that is not a map.
     pub map_tier: Option<u32>,
+    /// The category this base belongs to.
+    ///
+    /// The item text names an item class, not a trade category, and the two do
+    /// not line up. The data file holds the mapping, so the parser reads the
+    /// category from the base rather than guessing from the class line.
+    pub category: Option<ItemCategory>,
 }
 
 /// One parsed item.
@@ -302,6 +308,13 @@ pub struct ParsedItem {
     pub influences: Vec<Influence>,
     pub sentinel_charge: Option<u32>,
     pub unidentified_tier: Option<u32>,
+
+    /// Every modifier the parser matched, in the order the game printed them.
+    ///
+    /// Typed as the parse controller's own struct rather than a types struct,
+    /// because a modifier is only meaningful next to the stats it granted and
+    /// splitting the two would lose that pairing.
+    pub modifiers: Vec<crate::controller::parse::shared::modifiers::ParsedModifier>,
 
     pub unknown_modifiers: Vec<UnknownModifier>,
 

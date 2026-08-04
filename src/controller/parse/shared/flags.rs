@@ -202,7 +202,7 @@ mod tests {
         v.iter().map(|s| s.to_string()).collect()
     }
 
-    fn state() -> ParserState {
+    fn state() -> ParserState<'static> {
         ParserState::default()
     }
 

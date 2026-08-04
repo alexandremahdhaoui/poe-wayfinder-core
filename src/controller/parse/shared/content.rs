@@ -259,7 +259,7 @@ mod tests {
     }
 
     /// A normal rarity item whose name plate line is `name`.
-    fn normal(name: &str) -> ParserState {
+    fn normal(name: &str) -> ParserState<'static> {
         let mut s = ParserState {
             name: name.into(),
             ..ParserState::default()
@@ -269,7 +269,7 @@ mod tests {
         s
     }
 
-    fn named(name: &str) -> ParserState {
+    fn named(name: &str) -> ParserState<'static> {
         let mut item = crate::types::item::ParsedItem::default();
         item.info.reference_name = name.into();
 

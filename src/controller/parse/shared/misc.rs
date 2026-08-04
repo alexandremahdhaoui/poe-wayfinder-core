@@ -228,7 +228,7 @@ mod tests {
         v.iter().map(|s| s.to_string()).collect()
     }
 
-    fn currency() -> ParserState {
+    fn currency() -> ParserState<'static> {
         let mut s = ParserState::default();
         s.item.category = Some(ItemCategory::Currency);
 

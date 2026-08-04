@@ -11,7 +11,7 @@
 
 use crate::types::game::GameVersion;
 
-use super::shared::{combat, content, flags, levels, misc};
+use super::shared::{combat, content, flags, levels, misc, modifiers};
 use super::Stage;
 
 /// Build the stage list for a game.
@@ -63,11 +63,23 @@ fn body() -> Vec<Stage> {
     ]
 }
 
+/// Five occurrences of the modifier stage.
+///
+/// One per modifier block the game can print: enchant, rune, implicit,
+/// granted skill and explicit. Each occurrence claims a different section,
+/// because a section is consumed at most once.
+fn modifier_stages() -> Vec<Stage> {
+    (0..5)
+        .map(|_| Stage::Section(modifiers::parse_modifiers))
+        .collect()
+}
+
 /// The PoE1 pipeline.
 fn poe1() -> Vec<Stage> {
     let mut out = preamble();
     out.extend(body());
     out.extend([Stage::Section(misc::parse_timelost_radius)]);
+    out.extend(modifier_stages());
 
     out
 }
@@ -94,12 +106,15 @@ fn poe2() -> Vec<Stage> {
         Stage::Section(misc::parse_timelost_radius),
     ]);
 
+    out.extend(modifier_stages());
+
     out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adapter::data_adapter::NO_DATA;
     use crate::controller::parse::run;
     use crate::types::item::{ItemRarity, StackSize};
 
@@ -140,6 +155,7 @@ mod tests {
                 "Corrupted",
             ]),
             &pipeline(GameVersion::Poe1),
+            &NO_DATA,
         )
         .unwrap();
 
@@ -165,6 +181,7 @@ mod tests {
                 "Reforges a rare item with new random modifiers.",
             ]),
             &pipeline(GameVersion::Poe1),
+            &NO_DATA,
         )
         .unwrap();
 
@@ -191,7 +208,7 @@ mod tests {
             "Item Level: 70",
         ]);
 
-        let item = run(&item_text, &pipeline(GameVersion::Poe1)).unwrap();
+        let item = run(&item_text, &pipeline(GameVersion::Poe1), &NO_DATA).unwrap();
 
         assert!(item.is_unidentified);
         assert_eq!(item.item_level, Some(70));
@@ -213,6 +230,7 @@ mod tests {
                 "Item Level: 84",
             ]),
             &pipeline(GameVersion::Poe1),
+            &NO_DATA,
         )
         .unwrap();
 
@@ -237,6 +255,7 @@ mod tests {
                 "Item Level: 78",
             ]),
             &pipeline(GameVersion::Poe2),
+            &NO_DATA,
         )
         .unwrap();
 
@@ -257,6 +276,7 @@ mod tests {
                 "Note: ~price 5 divine",
             ]),
             &pipeline(GameVersion::Poe2),
+            &NO_DATA,
         )
         .unwrap();
 
@@ -279,6 +299,7 @@ mod tests {
                 "Shaper Item",
             ]),
             &pipeline(GameVersion::Poe1),
+            &NO_DATA,
         )
         .unwrap();
 
@@ -301,6 +322,7 @@ mod tests {
                 "Corrupted",
             ]),
             &pipeline(GameVersion::Poe1),
+            &NO_DATA,
         )
         .unwrap();
 

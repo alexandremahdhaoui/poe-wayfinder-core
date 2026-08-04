@@ -17,6 +17,7 @@ pub mod pipeline;
 pub mod sections;
 pub mod shared;
 
+use crate::adapter::data_adapter::{GameData, NO_DATA};
 use crate::types::item::ParsedItem;
 
 pub use nameplate::{parse_name_plate, NamePlate};
@@ -63,13 +64,13 @@ impl std::fmt::Display for ParseError {
 impl std::error::Error for ParseError {}
 
 /// One section consuming stage.
-pub type SectionStage = fn(&[String], &mut ParserState) -> ParseOutcome;
+pub type SectionStage = fn(&[String], &mut ParserState<'_>) -> ParseOutcome;
 
 /// One stage that reads no section.
 ///
 /// The reference calls these virtual parsers. They run once, in pipeline
 /// order, and derive state from what earlier stages already set.
-pub type VirtualStage = fn(&mut ParserState) -> Result<(), ParseError>;
+pub type VirtualStage = fn(&mut ParserState<'_>) -> Result<(), ParseError>;
 
 /// A pipeline entry.
 pub enum Stage {
@@ -84,13 +85,42 @@ pub enum Stage {
 /// Carries two fields the finished item does not. `name` and `base_type` are
 /// the raw name plate lines, and stages rewrite them before the database
 /// lookup runs.
-#[derive(Debug, Clone, Default)]
-pub struct ParserState {
+#[derive(Clone)]
+pub struct ParserState<'a> {
     pub item: ParsedItem,
     /// Line 3 of the name plate. Always present.
     pub name: String,
     /// Line 4 of the name plate. Absent on normal items and currency.
     pub base_type: Option<String>,
+    /// The stat and item tables.
+    ///
+    /// Carried on the state rather than passed to every stage, because only
+    /// two of the fifty stages need it and threading it through the other
+    /// forty eight would be noise.
+    pub data: &'a dyn GameData,
+}
+
+impl std::fmt::Debug for ParserState<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The data tables hold thousands of records and are never what a
+        // reader wants to see in a failure message.
+        f.debug_struct("ParserState")
+            .field("item", &self.item)
+            .field("name", &self.name)
+            .field("base_type", &self.base_type)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Default for ParserState<'_> {
+    fn default() -> Self {
+        Self {
+            item: ParsedItem::default(),
+            name: String::new(),
+            base_type: None,
+            data: &NO_DATA,
+        }
+    }
 }
 
 /// Parse clipboard text for a game.
@@ -100,15 +130,20 @@ pub struct ParserState {
 pub fn parse_clipboard(
     clipboard: &str,
     game: crate::types::game::GameVersion,
+    data: &dyn GameData,
 ) -> Result<ParsedItem, ParseError> {
-    run(clipboard, &pipeline(game))
+    run(clipboard, &pipeline(game), data)
 }
 
 /// Run a pipeline over clipboard text.
 ///
 /// The section list shrinks as stages consume from it, so a later stage never
 /// sees a section an earlier stage already claimed.
-pub fn run(clipboard: &str, pipeline: &[Stage]) -> Result<ParsedItem, ParseError> {
+pub fn run(
+    clipboard: &str,
+    pipeline: &[Stage],
+    data: &dyn GameData,
+) -> Result<ParsedItem, ParseError> {
     let mut sections = text_to_sections(clipboard);
 
     if sections.is_empty() {
@@ -126,6 +161,7 @@ pub fn run(clipboard: &str, pipeline: &[Stage]) -> Result<ParsedItem, ParseError
         item: plate.item,
         name: plate.name,
         base_type: plate.base_type,
+        data,
     };
     state.item.raw_text = clipboard.to_string();
 
@@ -220,7 +256,7 @@ mod tests {
 
     #[test]
     fn the_name_plate_is_read_and_removed() {
-        let item = run(&plain_item(), &[]).unwrap();
+        let item = run(&plain_item(), &[], &NO_DATA).unwrap();
 
         assert_eq!(item.rarity, Some(ItemRarity::Rare));
         assert_eq!(item.raw_text, plain_item());
@@ -228,7 +264,7 @@ mod tests {
 
     #[test]
     fn a_stage_sees_every_remaining_section() {
-        let item = run(&plain_item(), &[Stage::Section(count_sections)]).unwrap();
+        let item = run(&plain_item(), &[Stage::Section(count_sections)], &NO_DATA).unwrap();
 
         assert_eq!(item.item_level, Some(2));
     }
@@ -237,7 +273,7 @@ mod tests {
     fn a_consumed_section_is_not_offered_again() {
         let pipeline = [Stage::Section(eat_first), Stage::Section(count_sections)];
 
-        let item = run(&plain_item(), &pipeline).unwrap();
+        let item = run(&plain_item(), &pipeline, &NO_DATA).unwrap();
 
         assert_eq!(item.item_level, Some(1));
     }
@@ -246,7 +282,7 @@ mod tests {
     fn parser_skipped_stops_that_stage_without_consuming() {
         let pipeline = [Stage::Section(bail_out), Stage::Section(count_sections)];
 
-        let item = run(&plain_item(), &pipeline).unwrap();
+        let item = run(&plain_item(), &pipeline, &NO_DATA).unwrap();
 
         // bail_out gave up on the first section and consumed nothing, so both
         // sections are still on offer.
@@ -264,7 +300,7 @@ mod tests {
             Stage::Section(count_sections),
         ];
 
-        let item = run(&plain_item(), &pipeline).unwrap();
+        let item = run(&plain_item(), &pipeline, &NO_DATA).unwrap();
 
         assert_eq!(item.item_level, None);
     }
@@ -277,7 +313,7 @@ mod tests {
             Ok(())
         }
 
-        let item = run(&plain_item(), &[Stage::Virtual(mark)]).unwrap();
+        let item = run(&plain_item(), &[Stage::Virtual(mark)], &NO_DATA).unwrap();
 
         assert!(item.is_corrupted);
     }
@@ -289,20 +325,20 @@ mod tests {
         }
 
         assert_eq!(
-            run(&plain_item(), &[Stage::Virtual(boom)]),
+            run(&plain_item(), &[Stage::Virtual(boom)], &NO_DATA),
             Err(ParseError::NotAnItem)
         );
     }
 
     #[test]
     fn empty_text_is_not_an_item() {
-        assert_eq!(run("", &[]), Err(ParseError::NotAnItem));
+        assert_eq!(run("", &[], &NO_DATA), Err(ParseError::NotAnItem));
     }
 
     #[test]
     fn a_bad_name_plate_aborts_before_any_stage_runs() {
         assert_eq!(
-            run("Rarity: Rare\nDoom", &[]),
+            run("Rarity: Rare\nDoom", &[], &NO_DATA),
             Err(ParseError::BadNamePlate)
         );
     }
@@ -336,7 +372,7 @@ mod tests {
         ]
         .join("\n");
 
-        let item = run(&text, &[]).unwrap();
+        let item = run(&text, &[], &NO_DATA).unwrap();
 
         // Without the hoist the name plate would read CANNOT_USE as the item
         // name and every later lookup would miss.
