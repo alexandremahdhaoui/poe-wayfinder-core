@@ -97,6 +97,15 @@ pub struct ParserState<'a> {
     /// The data tables are per game and a PoE1 base looked up in the PoE2
     /// table finds nothing.
     pub game: crate::types::game::GameVersion,
+    /// Bases that share this item's name.
+    ///
+    /// Filled by the database lookup when a name covers several variants. A
+    /// Two-Stone Ring is three different trade items and only the implicit
+    /// tells them apart.
+    pub variants: Vec<(
+        crate::types::item::BaseInfo,
+        crate::controller::parse::shared::variant::Discriminator,
+    )>,
     /// The stat and item tables.
     ///
     /// Carried on the state rather than passed to every stage, because only
@@ -125,6 +134,7 @@ impl Default for ParserState<'_> {
             name: String::new(),
             base_type: None,
             game: crate::types::game::GameVersion::Poe2,
+            variants: Vec::new(),
             data: &NO_DATA,
         }
     }
@@ -169,6 +179,7 @@ pub fn run(
         item: plate.item,
         name: plate.name,
         base_type: plate.base_type,
+        variants: Vec::new(),
         game,
         data,
     };

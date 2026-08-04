@@ -12,3 +12,4 @@ pub mod misc;
 pub mod modifiers;
 pub mod sockets;
 pub mod special;
+pub mod variant;

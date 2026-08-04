@@ -11,7 +11,9 @@
 
 use crate::types::game::GameVersion;
 
-use super::shared::{combat, content, database, flags, levels, misc, modifiers, sockets, special};
+use super::shared::{
+    combat, content, database, flags, levels, misc, modifiers, sockets, special, variant,
+};
 use super::Stage;
 
 /// Build the stage list for a game.
@@ -97,6 +99,9 @@ fn derived_stages() -> Vec<Stage> {
     vec![
         Stage::Virtual(special::parse_fractured),
         Stage::Virtual(special::parse_blighted_map),
+        // The variant is chosen after the modifiers are read, because the
+        // implicit is what tells two bases of one name apart.
+        Stage::Virtual(variant::pick_correct_variant),
         Stage::Virtual(special::calc_base_percentile),
     ]
 }
