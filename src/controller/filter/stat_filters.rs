@@ -14,6 +14,9 @@
 use crate::adapter::data_adapter::StatLookup;
 use crate::controller::aggregate::sum_stats_by_type;
 use crate::controller::filter::pseudo::pseudo_totals;
+use crate::controller::filter::rules::{
+    hidden_reason, should_enable, ItemFacts, GOOD_ROLL_THRESHOLD,
+};
 use crate::controller::parse::shared::modifiers::ParsedModifier;
 use crate::types::modifier::ModifierType;
 use crate::types::query::{Range, StatFilter, StatGroup};
@@ -29,6 +32,11 @@ pub struct StatFilterOptions {
     /// Off by default. A query that requires every modifier returns the one
     /// listing that is this exact item.
     pub enable_all: bool,
+    /// What the item is, for the enable and hide rules.
+    ///
+    /// Without it every filter arrives disabled and the user switches on six
+    /// by hand, which is most of the work the tool exists to save.
+    pub facts: ItemFacts,
 }
 
 impl Default for StatFilterOptions {
@@ -36,6 +44,11 @@ impl Default for StatFilterOptions {
         Self {
             roll_tolerance: 0.1,
             enable_all: false,
+            facts: ItemFacts {
+                is_unique: false,
+                is_modifiable: true,
+                is_finished_magic: false,
+            },
         }
     }
 }
@@ -147,8 +160,21 @@ fn build_one(
     let ids = hit.stat.trade.ids_for(lookup_kind)?;
     let id = ids.first()?;
 
+    // A unique's fixed stat narrows nothing and fills the panel with a row
+    // nobody clicks.
+    let hidden = hidden_reason(matched, roll, options.facts);
+
+    if hidden.is_some() {
+        return None;
+    }
+
     let mut filter = StatFilter::range(id, Range::default());
-    filter.disabled = !options.enable_all;
+
+    // A modifier that rolled near the top of its range is why the item is
+    // worth anything. One that rolled badly is noise, and enabling it excludes
+    // every item that rolled it worse.
+    filter.disabled =
+        !options.enable_all && !should_enable(roll, hit.stat.better, hidden, GOOD_ROLL_THRESHOLD);
 
     let Some(roll) = roll else {
         // A stat with no roll is a presence check. It needs no range.
@@ -311,18 +337,61 @@ mod tests {
     }
 
     #[test]
-    fn filters_start_disabled() {
-        // A query requiring all six of a rare's modifiers returns the one
-        // listing that is this exact item, or none.
+    fn a_badly_rolled_modifier_starts_disabled() {
+        // Enabling it excludes every item that rolled it worse, which is most
+        // of them.
+        let poor = Some(StatRoll {
+            value: 55.0,
+            min: 50.0,
+            max: 100.0,
+            ..StatRoll::default()
+        });
+
+        let mods = vec![modifier(ModifierType::Explicit, "# to maximum Life", poor)];
+
+        let group = build_stat_group(&mods, &life_table(), StatFilterOptions::default()).unwrap();
+
+        assert!(group.filters[0].disabled);
+    }
+
+    #[test]
+    fn a_well_rolled_modifier_starts_enabled() {
+        // It is why the item is worth anything, and leaving every filter off
+        // means the user switches on six by hand.
+        let good = Some(StatRoll {
+            value: 98.0,
+            min: 50.0,
+            max: 100.0,
+            ..StatRoll::default()
+        });
+
+        let mods = vec![modifier(ModifierType::Explicit, "# to maximum Life", good)];
+
+        let group = build_stat_group(&mods, &life_table(), StatFilterOptions::default()).unwrap();
+
+        assert!(!group.filters[0].disabled);
+    }
+
+    #[test]
+    fn a_uniques_fixed_stat_yields_no_filter_at_all() {
+        // Filtering on it narrows nothing and fills the panel with a row
+        // nobody clicks.
+        let options = StatFilterOptions {
+            facts: crate::controller::filter::rules::ItemFacts {
+                is_unique: true,
+                is_modifiable: false,
+                is_finished_magic: false,
+            },
+            ..StatFilterOptions::default()
+        };
+
         let mods = vec![modifier(
             ModifierType::Explicit,
             "# to maximum Life",
             roll(50.0),
         )];
 
-        let group = build_stat_group(&mods, &life_table(), StatFilterOptions::default()).unwrap();
-
-        assert!(group.filters[0].disabled);
+        assert!(build_stat_group(&mods, &life_table(), options).is_none());
     }
 
     #[test]

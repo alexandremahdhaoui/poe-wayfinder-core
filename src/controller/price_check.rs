@@ -221,7 +221,9 @@ mod tests {
     }
 
     #[test]
-    fn every_stat_filter_starts_disabled() {
+    fn a_filter_is_enabled_only_when_its_roll_earns_it() {
+        // The rolls in this fixture carry no range, so each reads as the best
+        // possible and every filter is on. A badly rolled one would be off.
         let got = price_check(
             &ring_text(),
             &data(),
@@ -229,7 +231,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(got.query.stats[0].filters.iter().all(|f| f.disabled));
+        assert!(got.query.stats[0].filters.iter().all(|f| !f.disabled));
     }
 
     #[test]

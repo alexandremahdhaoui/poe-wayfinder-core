@@ -9,7 +9,9 @@
 //! them, and each is small enough that the alternative is a pile of special
 //! cases inside the general modifier stage.
 
-use crate::controller::calc::quality::{prop_percentile, PropContributions};
+use crate::controller::aggregate::sum_stats_by_type;
+use crate::controller::calc::base::{contributions, ARMOUR, ENERGY_SHIELD, EVASION};
+use crate::controller::calc::quality::prop_percentile;
 use crate::controller::parse::shared::modifiers::match_stat_lines;
 use crate::controller::parse::{ParseError, ParseOutcome, ParserState};
 use crate::controller::stat_match::placeholder::StatString;
@@ -272,13 +274,18 @@ pub fn calc_base_percentile(state: &mut ParserState<'_>) -> Result<(), ParseErro
     let bounds = state.item.info.armour_bounds;
     let quality = f64::from(state.item.quality.unwrap_or(0));
 
+    // The modifiers have to be taken out before the base can be judged. An
+    // item with a big armour roll and a big armour modifier has an ordinary
+    // base, and reporting it as a good one is the whole failure this avoids.
+    let totals = sum_stats_by_type(&state.item.modifiers);
+
     let pairs = [
-        (state.item.armour.ar, bounds.ar),
-        (state.item.armour.ev, bounds.ev),
-        (state.item.armour.es, bounds.es),
+        (state.item.armour.ar, bounds.ar, ARMOUR),
+        (state.item.armour.ev, bounds.ev, EVASION),
+        (state.item.armour.es, bounds.es, ENERGY_SHIELD),
     ];
 
-    for (rolled, range) in pairs {
+    for (rolled, range, stats) in pairs {
         let (Some(rolled), Some(range)) = (rolled, range) else {
             continue;
         };
@@ -290,7 +297,7 @@ pub fn calc_base_percentile(state: &mut ParserState<'_>) -> Result<(), ParseErro
         state.item.base_percentile = Some(prop_percentile(
             rolled,
             range,
-            PropContributions::default(),
+            contributions(stats, &totals),
             quality,
         ));
 

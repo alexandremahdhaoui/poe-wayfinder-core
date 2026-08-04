@@ -7,6 +7,7 @@
 
 pub mod item_filters;
 pub mod pseudo;
+pub mod rules;
 pub mod stat_filters;
 
 pub use item_filters::{build_query, FilterOptions};
