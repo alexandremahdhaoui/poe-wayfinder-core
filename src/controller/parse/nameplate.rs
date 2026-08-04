@@ -67,6 +67,12 @@ pub fn parse_name_plate(section: &[String]) -> Result<NamePlate, ParseError> {
 
     let class_line = lines.next().ok_or(ParseError::BadNamePlate)?;
 
+    // A meta gem prints no item class line at all, so its rarity line comes
+    // first. Rejecting it would make every meta gem unparseable.
+    if is_missing_item_class(section) {
+        return parse_without_class_line(section);
+    }
+
     if !class_line.starts_with(cs::ITEM_CLASS) {
         // A rarity line in another language is the common cause. Saying so
         // beats a generic parse failure, because the fix is to change the game
@@ -92,6 +98,58 @@ pub fn parse_name_plate(section: &[String]) -> Result<NamePlate, ParseError> {
     }
 
     let name = strip_markup(next.ok_or(ParseError::BadNamePlate)?);
+    let base_type = lines.next().map(|l| strip_markup(l));
+
+    Ok(NamePlate {
+        item,
+        name,
+        base_type,
+    })
+}
+
+/// Whether the item printed no class line.
+///
+/// Ported from `isItemMissingItemClass`. A meta gem is the only item that does
+/// this, and the signal is a short first section whose first line is the
+/// rarity.
+///
+/// The length bound matters. A longer section starting with a rarity line is a
+/// normal item whose class line is missing for a different reason, and reading
+/// it this way would misalign every line after it.
+pub fn is_missing_item_class(section: &[String]) -> bool {
+    if section.len() > 3 || section.len() < 2 {
+        return false;
+    }
+
+    section[0].starts_with(cs::RARITY)
+}
+
+/// Read a name plate that carries no class line.
+///
+/// The rarity is first and the name second. Everything else follows the normal
+/// rules.
+fn parse_without_class_line(section: &[String]) -> Result<NamePlate, ParseError> {
+    let mut lines = section.iter();
+
+    let rarity_line = lines.next().ok_or(ParseError::BadNamePlate)?;
+
+    let rarity_text = rarity_line
+        .strip_prefix(cs::RARITY)
+        .ok_or(ParseError::BadNamePlate)?;
+
+    let mut item = ParsedItem {
+        rarity: rarity_from_rarity_text(rarity_text),
+        category: category_from_rarity_text(rarity_text),
+        ..ParsedItem::default()
+    };
+
+    // Only a gem prints this way, and the reference forces the category for
+    // exactly that reason.
+    if item.category.is_none() {
+        item.category = Some(ItemCategory::Gem);
+    }
+
+    let name = strip_markup(lines.next().ok_or(ParseError::BadNamePlate)?);
     let base_type = lines.next().map(|l| strip_markup(l));
 
     Ok(NamePlate {
@@ -316,10 +374,45 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_class_line_fails() {
-        let err = parse_name_plate(&lines(&["Rarity: Rare", "Doom Fletch"])).unwrap_err();
+    fn a_meta_gem_prints_no_class_line_and_still_parses() {
+        // Found by running our parser against the upstream project's own test
+        // fixtures. A meta gem is the only item that does this, and rejecting
+        // it made every one unparseable.
+        let plate = parse_name_plate(&lines(&["Rarity: Gem", "Mirage Archer"])).unwrap();
+
+        assert_eq!(plate.name, "Mirage Archer");
+        assert_eq!(plate.item.category, Some(ItemCategory::Gem));
+    }
+
+    #[test]
+    fn a_long_section_starting_with_a_rarity_is_not_a_meta_gem() {
+        // Reading it that way would misalign every line after it.
+        assert!(!is_missing_item_class(&lines(&[
+            "Rarity: Rare",
+            "Doom Fletch",
+            "Spine Bow",
+            "extra"
+        ])));
+
+        let err = parse_name_plate(&lines(&[
+            "Rarity: Rare",
+            "Doom Fletch",
+            "Spine Bow",
+            "extra",
+        ]))
+        .unwrap_err();
 
         assert_eq!(err, ParseError::BadNamePlate);
+    }
+
+    #[test]
+    fn a_one_line_section_is_not_a_meta_gem() {
+        assert!(!is_missing_item_class(&lines(&["Rarity: Gem"])));
+    }
+
+    #[test]
+    fn a_section_not_starting_with_a_rarity_is_not_a_meta_gem() {
+        assert!(!is_missing_item_class(&lines(&["Mirage Archer", "x"])));
     }
 
     #[test]

@@ -402,8 +402,10 @@ mod tests {
     #[test]
     fn a_bad_name_plate_aborts_before_any_stage_runs() {
         assert_eq!(
+            // Not "Rarity: ..." on its own: that is a meta gem, which is
+            // valid. This is text with no name plate shape at all.
             run(
-                "Rarity: Rare\nDoom",
+                "hello\nworld",
                 &[],
                 &NO_DATA,
                 crate::types::game::GameVersion::Poe2

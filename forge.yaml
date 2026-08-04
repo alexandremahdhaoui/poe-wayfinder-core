@@ -39,4 +39,16 @@ test:
     runner: go://generic-test-runner
     spec:
       command: cargo
-      args: ["test", "-p", "poe-trader-core"]
+      args: ["test", "-p", "poe-trader-core", "--lib"]
+
+  # Our parser against the upstream project's own 26 test items, plus the
+  # hostile input suite.
+  #
+  # A unit test proves one stage does what I think it should. These prove the
+  # whole pipeline survives items a different team wrote. The meta gem name
+  # plate bug was found here and nowhere else.
+  - name: conformance
+    runner: go://generic-test-runner
+    spec:
+      command: cargo
+      args: ["test", "-p", "poe-trader-core", "--tests"]
