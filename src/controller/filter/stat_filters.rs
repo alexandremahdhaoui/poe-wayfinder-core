@@ -13,6 +13,7 @@
 
 use crate::adapter::data_adapter::StatLookup;
 use crate::controller::aggregate::sum_stats_by_type;
+use crate::controller::filter::item_property::{armour_filters, weapon_filters};
 use crate::controller::filter::pseudo::pseudo_totals;
 use crate::controller::filter::rules::{
     hidden_reason, should_enable, ItemFacts, GOOD_ROLL_THRESHOLD,
@@ -67,7 +68,48 @@ pub fn build_stat_group(
     data: &dyn StatLookup,
     options: StatFilterOptions,
 ) -> Option<StatGroup> {
+    build_stat_group_for(modifiers, None, data, options)
+}
+
+/// Build the stat group, including the item's own numbers.
+///
+/// A weapon is bought for its damage per second and an armour piece for its
+/// largest defence. Neither is a modifier, so neither reaches the query
+/// through the modifier path, and a weapon search without a dps filter returns
+/// every weapon of that base.
+pub fn build_stat_group_for(
+    modifiers: &[ParsedModifier],
+    item: Option<&crate::types::item::ParsedItem>,
+    data: &dyn StatLookup,
+    options: StatFilterOptions,
+) -> Option<StatGroup> {
     let mut filters = Vec::new();
+
+    if let Some(item) = item {
+        for property in armour_filters(item.armour)
+            .into_iter()
+            .chain(weapon_filters(item.category, item.weapon))
+        {
+            let mut filter = StatFilter::range(
+                property.id,
+                bound_for(
+                    crate::types::stat::StatRoll {
+                        value: property.value,
+                        min: property.value,
+                        max: property.value,
+                        ..crate::types::stat::StatRoll::default()
+                    },
+                    crate::types::stat::StatBetter::PositiveRoll,
+                    false,
+                    options,
+                ),
+            );
+
+            filter.disabled = !options.enable_all && !property.enabled;
+
+            filters.push(filter);
+        }
+    }
 
     let totals = sum_stats_by_type(modifiers);
 

@@ -9,7 +9,7 @@
 
 use crate::adapter::data_adapter::GameData;
 use crate::controller::filter::item_filters::{build_query, FilterOptions};
-use crate::controller::filter::stat_filters::{build_stat_group, StatFilterOptions};
+use crate::controller::filter::stat_filters::{build_stat_group_for, StatFilterOptions};
 use crate::controller::parse::{parse_clipboard, ParseError};
 use crate::types::game::GameVersion;
 use crate::types::item::ParsedItem;
@@ -68,7 +68,17 @@ pub fn price_check(
 
     let mut query = build_query(&item, options.filters);
 
-    if let Some(group) = build_stat_group(&item.modifiers, data, options.stats) {
+    // The item's own numbers reach the query here. A weapon is bought for its
+    // damage per second and that is not a modifier.
+    let mut stats = options.stats;
+    stats.facts = crate::controller::filter::rules::ItemFacts {
+        is_unique: item.rarity == Some(crate::types::item::ItemRarity::Unique),
+        is_modifiable: item.is_modifiable(),
+        is_finished_magic: item.rarity == Some(crate::types::item::ItemRarity::Magic)
+            && !item.is_modifiable(),
+    };
+
+    if let Some(group) = build_stat_group_for(&item.modifiers, Some(&item), data, stats) {
         query.stats.push(group);
     }
 

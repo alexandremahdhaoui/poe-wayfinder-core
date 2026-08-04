@@ -6,6 +6,7 @@
 //! this exact roll".
 
 pub mod item_filters;
+pub mod item_property;
 pub mod pseudo;
 pub mod rules;
 pub mod stat_filters;
