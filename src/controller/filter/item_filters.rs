@@ -12,6 +12,8 @@
 //! rare searches by base type and category, never by name, because its name is
 //! random. A unique searches by name, because its name is the item.
 
+use crate::controller::filter::brackets::{ceil_to_bracket, floor_to_bracket, ITEM_LEVEL_BRACKETS};
+use crate::controller::filter::common::max_useful_item_level;
 use crate::types::category::ItemCategory;
 use crate::types::item::{ItemRarity, ParsedItem};
 use crate::types::query::{
@@ -90,6 +92,53 @@ fn apply_identity(item: &ParsedItem, query: &mut TradeQuery) {
 }
 
 /// Category, rarity, item level and quality.
+/// The item level filter, or nothing when the level says nothing about price.
+///
+/// # When item level is not worth sending
+///
+/// A tablet, a jewel and a map roll the same modifiers at every level, so the
+/// level narrows nothing and only excludes listings. A unique's level says
+/// nothing about its rolls at all.
+///
+/// A cluster jewel is the exception that gets a two ended range. Its passive
+/// count is tied to bands of item level, so a buyer wants the band and not a
+/// floor.
+fn item_level_range(item: &ParsedItem) -> Option<Range> {
+    let level = item.item_level?;
+
+    // These roll the same modifiers at every level.
+    if max_useful_item_level(item.category) == 1 {
+        return None;
+    }
+
+    // A unique's level says nothing about its rolls.
+    if item.rarity == Some(ItemRarity::Unique) {
+        return None;
+    }
+
+    if item.category == Some(ItemCategory::ClusterJewel) {
+        return Some(Range {
+            min: Some(f64::from(floor_to_bracket(level, ITEM_LEVEL_BRACKETS))),
+            // The upper brackets run downwards because they mark the top of
+            // each band rather than the bottom.
+            max: Some(f64::from(ceil_to_bracket(level, CLUSTER_UPPER_BRACKETS))),
+        });
+    }
+
+    // Capped. Item level stops mattering once every modifier the base can roll
+    // is reachable, and filtering above the cap excludes cheaper listings that
+    // are just as good.
+    Some(Range::at_least(f64::from(
+        level.min(max_useful_item_level(item.category)),
+    )))
+}
+
+/// The tops of the cluster jewel item level bands.
+///
+/// Descending because each marks the top of a band. Rounding up through them
+/// in order finds the band the level sits in.
+const CLUSTER_UPPER_BRACKETS: &[u32] = &[49, 67, 74, 100];
+
 fn apply_type_filters(item: &ParsedItem, options: FilterOptions, out: &mut TypeFilters) {
     if let Some(category) = item.category {
         out.category = category_trade_ids()
@@ -107,8 +156,8 @@ fn apply_type_filters(item: &ParsedItem, options: FilterOptions, out: &mut TypeF
     }
 
     if options.filter_item_level {
-        if let Some(ilvl) = item.item_level {
-            out.ilvl = Range::at_least(f64::from(ilvl));
+        if let Some(range) = item_level_range(item) {
+            out.ilvl = range;
         }
     }
 
@@ -438,7 +487,136 @@ mod tests {
 
         let q = build_query(&rare_bow(), options);
 
-        assert_eq!(q.filters.type_filters.ilvl.min, Some(84.0));
+        // Capped at 82. Item level stops mattering once every modifier a bow
+        // can roll is reachable, and 84 excludes cheaper listings that are
+        // just as good.
+        assert_eq!(q.filters.type_filters.ilvl.min, Some(82.0));
+    }
+
+    #[test]
+    fn a_wand_caps_lower_than_a_bow() {
+        // Its last modifier tier unlocks at 81.
+        let options = FilterOptions {
+            filter_item_level: true,
+            ..FilterOptions::default()
+        };
+
+        let wand = ParsedItem {
+            category: Some(ItemCategory::Wand),
+            ..rare_bow()
+        };
+
+        assert_eq!(
+            build_query(&wand, options).filters.type_filters.ilvl.min,
+            Some(81.0)
+        );
+    }
+
+    #[test]
+    fn an_item_below_its_cap_keeps_its_own_level() {
+        let options = FilterOptions {
+            filter_item_level: true,
+            ..FilterOptions::default()
+        };
+
+        let low = ParsedItem {
+            item_level: Some(60),
+            ..rare_bow()
+        };
+
+        assert_eq!(
+            build_query(&low, options).filters.type_filters.ilvl.min,
+            Some(60.0)
+        );
+    }
+
+    #[test]
+    fn a_base_whose_level_says_nothing_is_not_filtered() {
+        // A jewel and a map roll the same modifiers at every level, so the
+        // filter narrows nothing and only excludes listings.
+        let options = FilterOptions {
+            filter_item_level: true,
+            ..FilterOptions::default()
+        };
+
+        for category in [ItemCategory::Jewel, ItemCategory::Map, ItemCategory::Tablet] {
+            let item = ParsedItem {
+                category: Some(category),
+                ..rare_bow()
+            };
+
+            assert!(
+                build_query(&item, options)
+                    .filters
+                    .type_filters
+                    .ilvl
+                    .is_empty(),
+                "{category:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_unique_is_not_filtered_by_item_level() {
+        // Its level says nothing about its rolls.
+        let options = FilterOptions {
+            filter_item_level: true,
+            ..FilterOptions::default()
+        };
+
+        let unique = ParsedItem {
+            rarity: Some(ItemRarity::Unique),
+            ..rare_bow()
+        };
+
+        assert!(build_query(&unique, options)
+            .filters
+            .type_filters
+            .ilvl
+            .is_empty());
+    }
+
+    #[test]
+    fn a_cluster_jewel_gets_a_two_ended_band() {
+        // Its passive count is tied to bands of item level, so a buyer wants
+        // the band and not a floor.
+        let options = FilterOptions {
+            filter_item_level: true,
+            ..FilterOptions::default()
+        };
+
+        let cluster = ParsedItem {
+            category: Some(ItemCategory::ClusterJewel),
+            item_level: Some(70),
+            ..rare_bow()
+        };
+
+        let ilvl = build_query(&cluster, options).filters.type_filters.ilvl;
+
+        assert_eq!(ilvl.min, Some(68.0));
+        assert_eq!(ilvl.max, Some(74.0));
+    }
+
+    #[test]
+    fn a_cluster_jewel_band_always_contains_its_own_level() {
+        // A band that excluded the item it came from would return nothing.
+        let options = FilterOptions {
+            filter_item_level: true,
+            ..FilterOptions::default()
+        };
+
+        for level in 1..=100u32 {
+            let cluster = ParsedItem {
+                category: Some(ItemCategory::ClusterJewel),
+                item_level: Some(level),
+                ..rare_bow()
+            };
+
+            let ilvl = build_query(&cluster, options).filters.type_filters.ilvl;
+
+            assert!(ilvl.min.unwrap() <= f64::from(level), "{level}");
+            assert!(ilvl.max.unwrap() >= f64::from(level), "{level}");
+        }
     }
 
     #[test]

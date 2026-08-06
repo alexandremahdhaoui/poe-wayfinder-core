@@ -276,6 +276,12 @@ pub struct BaseInfo {
     /// bases today. The percentile reports nothing rather than guessing when
     /// it is missing.
     pub armour_bounds: ArmourBounds,
+    /// The id the exchange endpoint knows this base by.
+    ///
+    /// Absent for anything not traded in bulk. Its absence routes a price
+    /// check to the search endpoint, which is the honest answer for an item
+    /// the exchange endpoint would reject.
+    pub trade_tag: Option<String>,
     /// The category this base belongs to.
     ///
     /// The item text names an item class, not a trade category, and the two do

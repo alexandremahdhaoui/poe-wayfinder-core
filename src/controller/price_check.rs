@@ -8,6 +8,7 @@
 //! the item was.
 
 use crate::adapter::data_adapter::GameData;
+use crate::controller::bulk::{endpoint_for, Endpoint, RouteFacts};
 use crate::controller::filter::item_filters::{build_query, FilterOptions};
 use crate::controller::filter::presets::{
     gem_level_filter, preset_for, trials_filter, uses_item_properties, uses_modifiers,
@@ -44,6 +45,16 @@ pub struct PriceCheck {
     pub item: ParsedItem,
     /// The query to send.
     pub query: TradeQuery,
+    /// Which endpoint to send it to.
+    ///
+    /// A currency priced on the search endpoint returns the handful of people
+    /// who listed one individually rather than the market rate.
+    pub endpoint: Endpoint,
+    /// The id the exchange endpoint knows the item by.
+    ///
+    /// Only set when the endpoint is the exchange, because that is the only
+    /// request that carries it.
+    pub trade_tag: Option<String>,
 }
 
 impl PriceCheck {
@@ -101,7 +112,32 @@ pub fn price_check(
         }
     }
 
-    Ok(PriceCheck { item, query })
+    let route = RouteFacts {
+        trade_tag: item.info.trade_tag.clone(),
+        category: item.category,
+        // A stack size filter is not built yet, so neither flag can be set.
+        // Leaving them false routes by the tag alone, which is right for every
+        // item but a card or map the user narrowed by stack size.
+        stack_size_active: false,
+        has_stack_size_filter: false,
+        any_stat_enabled: query
+            .stats
+            .iter()
+            .flat_map(|group| &group.filters)
+            .any(|filter| !filter.disabled),
+    };
+
+    let endpoint = endpoint_for(&route);
+
+    Ok(PriceCheck {
+        trade_tag: match endpoint {
+            Endpoint::Exchange => item.info.trade_tag.clone(),
+            Endpoint::Search => None,
+        },
+        item,
+        query,
+        endpoint,
+    })
 }
 
 #[cfg(test)]
@@ -366,5 +402,89 @@ mod tests {
         .unwrap();
 
         assert_eq!(got.item.raw_text, ring_text());
+    }
+
+    // -----------------------------------------------------------------
+    // Endpoint routing
+    // -----------------------------------------------------------------
+
+    fn currency_text() -> String {
+        [
+            "Item Class: Stackable Currency",
+            "Rarity: Currency",
+            "Divine Orb",
+            "--------",
+            "Stack Size: 5/10",
+            "--------",
+            "Randomises the numeric values of the modifiers of an item",
+        ]
+        .join("\n")
+    }
+
+    fn data_with_bulk_currency() -> FakeData {
+        let mut out = data();
+        out.items.push(BaseInfo {
+            name: "Divine Orb".into(),
+            reference_name: "Divine Orb".into(),
+            trade_tag: Some("divine".into()),
+            ..BaseInfo::default()
+        });
+
+        out
+    }
+
+    #[test]
+    fn a_rare_goes_to_the_search_endpoint() {
+        let got = price_check(
+            &ring_text(),
+            &data(),
+            PriceCheckOptions::new(GameVersion::Poe2),
+        )
+        .expect("the item parses");
+
+        assert_eq!(got.endpoint, Endpoint::Search);
+    }
+
+    #[test]
+    fn a_search_check_carries_no_bulk_tag() {
+        // The search request has nowhere to put one, and sending it would be
+        // an unread field that looks like it did something.
+        let got = price_check(
+            &ring_text(),
+            &data(),
+            PriceCheckOptions::new(GameVersion::Poe2),
+        )
+        .expect("the item parses");
+
+        assert_eq!(got.trade_tag, None);
+    }
+
+    #[test]
+    fn a_currency_with_a_bulk_tag_goes_to_the_exchange_endpoint() {
+        // The search endpoint returns the handful of people who listed one
+        // individually rather than the market rate.
+        let got = price_check(
+            &currency_text(),
+            &data_with_bulk_currency(),
+            PriceCheckOptions::new(GameVersion::Poe2),
+        )
+        .expect("the item parses");
+
+        assert_eq!(got.endpoint, Endpoint::Exchange);
+        assert_eq!(got.trade_tag.as_deref(), Some("divine"));
+    }
+
+    #[test]
+    fn a_currency_our_data_has_no_tag_for_goes_to_the_search_endpoint() {
+        // Sending it to the exchange endpoint without a tag is a request the
+        // server rejects, and the user sees an error rather than a price.
+        let got = price_check(
+            &currency_text(),
+            &data(),
+            PriceCheckOptions::new(GameVersion::Poe2),
+        )
+        .expect("the item parses");
+
+        assert_eq!(got.endpoint, Endpoint::Search);
     }
 }
