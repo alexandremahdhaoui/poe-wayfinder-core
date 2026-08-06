@@ -18,7 +18,7 @@
 //! every wand worth buying.
 
 use crate::types::category::ItemCategory;
-use crate::types::item::{ArmourStats, WeaponStats};
+use crate::types::item::{ArmourStats, MapStats, WeaponStats};
 
 /// One property worth filtering on.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -208,6 +208,70 @@ pub fn weapon_filters(category: Option<ItemCategory>, weapon: WeaponStats) -> Ve
     }
 
     out
+}
+
+/// Which of a map's own numbers are worth filtering on.
+///
+/// Ported from `mapProps`. A map is bought for what it drops, so pack size and
+/// item rarity are the numbers that decide the price.
+///
+/// Every one starts switched off. A map with a good pack size and a poor item
+/// rarity is still a map worth buying, and filtering on both at once returns
+/// the one listing that is this exact map.
+pub fn map_filters(map: MapStats) -> Vec<PropertyFilter> {
+    let mut out = Vec::new();
+
+    let mut push = |id: &'static str, value: Option<f64>| {
+        // Zero is not a number worth filtering on. A map with no pack size
+        // bonus filtered at zero matches every map ever printed.
+        if let Some(value) = value.filter(|v| *v != 0.0) {
+            out.push(PropertyFilter {
+                id,
+                value,
+                enabled: false,
+            });
+        }
+    };
+
+    push("item.map_revives", map.revives.map(f64::from));
+    push("item.map_pack_size", map.pack_size);
+    push("item.map_magic_monsters", map.magic_monsters);
+    push("item.map_rare_monsters", map.rare_monsters);
+    push("item.map_drop_chance", map.drop_chance);
+    push("item.map_item_rarity", map.item_rarity);
+
+    out
+}
+
+/// The filter on how well the base itself rolled.
+///
+/// Ported from `filterBasePercentile`.
+///
+/// # What the percentile means
+///
+/// A base rolls its own armour and evasion within a range before any modifier
+/// touches it. Two identical looking chests can differ by a fifth of their
+/// defences because one rolled at the top of its range.
+///
+/// It starts switched on only above the halfway mark. A base that rolled below
+/// average is not what the buyer is paying for, and filtering on it narrows
+/// the search for nothing.
+pub fn base_percentile_filter(percentile: Option<f64>) -> Option<PropertyFilter> {
+    percentile.map(|value| PropertyFilter {
+        id: "item.base_percentile",
+        value,
+        enabled: value >= 50.0,
+    })
+}
+
+/// Drop the stats a property filter has already accounted for.
+///
+/// Ported from `removeUsedStats`. A bow's physical damage comes from its
+/// increased physical damage modifier. Sending both the damage per second and
+/// the modifier that produced it filters the same thing twice, and the search
+/// narrows twice as far as the buyer asked.
+pub fn remove_used_stats(stats: &mut Vec<String>, used: &[&str]) {
+    stats.retain(|reference| !used.contains(&reference.as_str()));
 }
 
 #[cfg(test)]
@@ -439,5 +503,189 @@ mod tests {
             Some(100.0),
             None
         )));
+    }
+
+    // -----------------------------------------------------------------
+    // Maps
+    // -----------------------------------------------------------------
+
+    fn map_with(pack_size: Option<f64>, rarity: Option<f64>) -> MapStats {
+        MapStats {
+            pack_size,
+            item_rarity: rarity,
+            ..MapStats::default()
+        }
+    }
+
+    fn ids(filters: &[PropertyFilter]) -> Vec<&str> {
+        filters.iter().map(|f| f.id).collect()
+    }
+
+    #[test]
+    fn a_map_is_filtered_on_what_it_drops() {
+        let got = map_filters(map_with(Some(30.0), Some(80.0)));
+
+        assert_eq!(ids(&got), ["item.map_pack_size", "item.map_item_rarity"]);
+    }
+
+    #[test]
+    fn every_map_filter_starts_switched_off() {
+        // A map with a good pack size and a poor item rarity is still worth
+        // buying, and filtering on both returns this exact map.
+        for filter in map_filters(map_with(Some(30.0), Some(80.0))) {
+            assert!(!filter.enabled, "{}", filter.id);
+        }
+    }
+
+    #[test]
+    fn a_number_the_map_does_not_have_is_not_filtered() {
+        assert!(map_filters(MapStats::default()).is_empty());
+    }
+
+    #[test]
+    fn a_zero_is_not_a_number_worth_filtering_on() {
+        // A map with no pack size bonus filtered at zero matches every map
+        // ever printed.
+        assert!(map_filters(map_with(Some(0.0), None)).is_empty());
+    }
+
+    #[test]
+    fn a_map_carries_its_value_through() {
+        let got = map_filters(map_with(Some(37.0), None));
+
+        assert_eq!(got[0].value, 37.0);
+    }
+
+    #[test]
+    fn the_poe1_only_numbers_are_still_read() {
+        // A PoE1 map prints them and a PoE2 one does not. Dropping them would
+        // silently lose the filter on every PoE1 map.
+        let got = map_filters(MapStats {
+            magic_monsters: Some(20.0),
+            rare_monsters: Some(15.0),
+            revives: Some(6),
+            drop_chance: Some(50.0),
+            ..MapStats::default()
+        });
+
+        assert_eq!(
+            ids(&got),
+            [
+                "item.map_revives",
+                "item.map_magic_monsters",
+                "item.map_rare_monsters",
+                "item.map_drop_chance"
+            ]
+        );
+    }
+
+    #[test]
+    fn every_map_filter_id_is_distinct() {
+        // A duplicate id would overwrite its twin in the request body.
+        let got = map_filters(MapStats {
+            pack_size: Some(1.0),
+            item_rarity: Some(1.0),
+            revives: Some(1),
+            drop_chance: Some(1.0),
+            magic_monsters: Some(1.0),
+            rare_monsters: Some(1.0),
+            ..MapStats::default()
+        });
+
+        let mut seen = ids(&got);
+        seen.sort_unstable();
+        let count = seen.len();
+        seen.dedup();
+
+        assert_eq!(seen.len(), count);
+    }
+
+    // -----------------------------------------------------------------
+    // Base percentile
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn a_well_rolled_base_starts_switched_on() {
+        // Two identical looking chests can differ by a fifth of their defences
+        // because one rolled at the top of its range.
+        let got = base_percentile_filter(Some(85.0)).expect("a percentile filters");
+
+        assert_eq!(got.id, "item.base_percentile");
+        assert_eq!(got.value, 85.0);
+        assert!(got.enabled);
+    }
+
+    #[test]
+    fn a_below_average_base_starts_switched_off() {
+        // It is not what the buyer is paying for, and filtering on it narrows
+        // the search for nothing.
+        assert!(
+            !base_percentile_filter(Some(20.0))
+                .expect("a percentile filters")
+                .enabled
+        );
+    }
+
+    #[test]
+    fn a_base_exactly_at_the_halfway_mark_starts_switched_on() {
+        assert!(
+            base_percentile_filter(Some(50.0))
+                .expect("a percentile filters")
+                .enabled
+        );
+    }
+
+    #[test]
+    fn an_unknown_percentile_produces_no_filter() {
+        // The roll ranges come from the game bundles, which we do not carry
+        // for most bases. Guessing would price the item against nothing.
+        assert_eq!(base_percentile_filter(None), None);
+    }
+
+    // -----------------------------------------------------------------
+    // Removing accounted stats
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn a_stat_a_property_already_covers_is_dropped() {
+        // Sending both the damage per second and the modifier that produced it
+        // narrows the search twice as far as the buyer asked.
+        let mut stats = vec![
+            "#% increased Physical Damage".to_string(),
+            "+# to maximum Life".to_string(),
+        ];
+
+        remove_used_stats(&mut stats, &["#% increased Physical Damage"]);
+
+        assert_eq!(stats, ["+# to maximum Life"]);
+    }
+
+    #[test]
+    fn removing_nothing_leaves_the_list_alone() {
+        let mut stats = vec!["+# to maximum Life".to_string()];
+
+        remove_used_stats(&mut stats, &[]);
+
+        assert_eq!(stats.len(), 1);
+    }
+
+    #[test]
+    fn removing_a_stat_that_is_not_there_changes_nothing() {
+        let mut stats = vec!["+# to maximum Life".to_string()];
+
+        remove_used_stats(&mut stats, &["#% increased Armour"]);
+
+        assert_eq!(stats.len(), 1);
+    }
+
+    #[test]
+    fn every_copy_of_a_used_stat_is_dropped() {
+        // A hybrid modifier can list the same stat twice, and leaving one
+        // behind sends the duplicate filter this exists to prevent.
+        let mut stats = vec!["a".to_string(), "b".to_string(), "a".to_string()];
+
+        remove_used_stats(&mut stats, &["a"]);
+
+        assert_eq!(stats, ["b"]);
     }
 }
