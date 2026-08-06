@@ -20,7 +20,7 @@ use crate::controller::filter::rules::{
 };
 use crate::controller::parse::shared::modifiers::ParsedModifier;
 use crate::types::modifier::ModifierType;
-use crate::types::query::{Range, StatFilter, StatGroup};
+use crate::types::query::{Range, StatFilter, StatGroup, StatGroupKind};
 use crate::types::stat::{StatBetter, StatRoll};
 
 /// How to build the stat filters.
@@ -83,6 +83,38 @@ pub fn build_stat_group_for(
     data: &dyn StatLookup,
     options: StatFilterOptions,
 ) -> Option<StatGroup> {
+    build_stat_filters(modifiers, item, data, options).and
+}
+
+/// Every group an item's stats produce.
+///
+/// # Why one group is not enough
+///
+/// 376 PoE1 stats and 40 PoE2 stats have the same printed text and two trade
+/// ids. `#% chance to Impale Enemies on Hit with Attacks` is one of them.
+/// Nothing in the text says which id the listing will be filed under.
+///
+/// Sending the first and dropping the rest, which is what this did, is right
+/// about half the time and silently finds nothing the other half.
+///
+/// The reference sends those as a `count` group needing one match, so any of
+/// the ids satisfies it. That is what `counts` holds.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StatFilters {
+    /// The group where every filter must match.
+    pub and: Option<StatGroup>,
+    /// One group per stat that has several trade ids.
+    pub counts: Vec<StatGroup>,
+}
+
+/// Build the `and` group and any `count` groups.
+pub fn build_stat_filters(
+    modifiers: &[ParsedModifier],
+    item: Option<&crate::types::item::ParsedItem>,
+    data: &dyn StatLookup,
+    options: StatFilterOptions,
+) -> StatFilters {
+    let mut counts = Vec::new();
     let mut filters = Vec::new();
 
     if let Some(item) = item {
@@ -154,21 +186,40 @@ pub fn build_stat_group_for(
             continue;
         };
 
-        let Some(filter) = build_one(&matched, total.roll, total.kind, data, options) else {
+        let Some(built) = build_one(&matched, total.roll, total.kind, data, options) else {
             continue;
         };
 
-        filters.push(filter);
+        match built.alternates.is_empty() {
+            true => filters.push(built.filter),
+            // Any one of the ids satisfies the search. Requiring all of them
+            // would require one listing to be filed under two ids at once.
+            false => counts.push(StatGroup {
+                kind: StatGroupKind::Count,
+                value: Range {
+                    min: Some(1.0),
+                    max: None,
+                },
+                disabled: built.filter.disabled,
+                filters: std::iter::once(built.filter.clone())
+                    .chain(built.alternates.iter().map(|id| {
+                        let mut alt = built.filter.clone();
+                        alt.id = id.clone();
+
+                        alt
+                    }))
+                    .collect(),
+            }),
+        }
     }
 
-    if filters.is_empty() {
-        return None;
+    StatFilters {
+        and: (!filters.is_empty()).then(|| StatGroup {
+            filters,
+            ..StatGroup::all(Vec::new())
+        }),
+        counts,
     }
-
-    Some(StatGroup {
-        filters,
-        ..StatGroup::all(Vec::new())
-    })
 }
 
 /// One filter per influence the item carries.
@@ -227,6 +278,14 @@ fn matched_text(modifiers: &[ParsedModifier], reference: &str) -> Option<String>
         .map(|s| s.matched.clone())
 }
 
+/// One built filter and the other ids the same stat is filed under.
+#[derive(Debug, Clone, PartialEq)]
+struct BuiltFilter {
+    filter: StatFilter,
+    /// Empty for almost every stat. See `StatFilters` for the rest.
+    alternates: Vec<String>,
+}
+
 /// Build one stat filter.
 fn build_one(
     matched: &str,
@@ -234,7 +293,7 @@ fn build_one(
     kind: ModifierType,
     data: &dyn StatLookup,
     options: StatFilterOptions,
-) -> Option<StatFilter> {
+) -> Option<BuiltFilter> {
     let hit = data.stat_by_matcher(matched)?;
 
     // An added rune is filed under rune on the trade site. Looking up
@@ -246,6 +305,9 @@ fn build_one(
 
     let ids = hit.stat.trade.ids_for(lookup_kind)?;
     let id = ids.first()?;
+    // The rest of them, when the same text is filed under several ids. See
+    // `StatFilters`.
+    let alternates: Vec<String> = ids.iter().skip(1).cloned().collect();
 
     // A unique's fixed stat narrows nothing and fills the panel with a row
     // nobody clicks.
@@ -265,7 +327,7 @@ fn build_one(
 
     let Some(roll) = roll else {
         // A stat with no roll is a presence check. It needs no range.
-        return Some(filter);
+        return Some(BuiltFilter { filter, alternates });
     };
 
     // A stat the trade site stores as an option takes the option and no range.
@@ -273,12 +335,12 @@ fn build_one(
     if hit.stat.trade.option {
         filter.option = roll.option.or(Some(roll.value));
 
-        return Some(filter);
+        return Some(BuiltFilter { filter, alternates });
     }
 
     filter.range = bound_for(roll, hit.stat.better, hit.stat.trade.inverted, options);
 
-    Some(filter)
+    Some(BuiltFilter { filter, alternates })
 }
 
 /// Decide which end of the roll to constrain.
@@ -433,6 +495,124 @@ mod tests {
             influences,
             ..crate::types::item::ParsedItem::default()
         }
+    }
+
+    fn two_id_table() -> FakeStats {
+        let mut trade = TradeInfo::default();
+        trade.ids.insert(
+            "explicit".into(),
+            vec!["explicit.stat_a".into(), "explicit.stat_b".into()],
+        );
+
+        FakeStats {
+            stats: vec![stat_with(
+                "#% chance to Impale Enemies on Hit with Attacks",
+                StatBetter::PositiveRoll,
+                trade,
+            )],
+        }
+    }
+
+    fn impale() -> Vec<ParsedModifier> {
+        vec![modifier(
+            ModifierType::Explicit,
+            "#% chance to Impale Enemies on Hit with Attacks",
+            roll(25.0),
+        )]
+    }
+
+    #[test]
+    fn a_stat_with_two_trade_ids_travels_as_a_count_group() {
+        // 376 PoE1 stats share one text across two ids. Nothing in the text
+        // says which one a listing is filed under, so requiring the first
+        // silently finds nothing about half the time.
+        let got = build_stat_filters(
+            &impale(),
+            None,
+            &two_id_table(),
+            StatFilterOptions::default(),
+        );
+
+        assert_eq!(got.counts.len(), 1);
+        assert_eq!(got.counts[0].kind, StatGroupKind::Count);
+    }
+
+    #[test]
+    fn a_count_group_needs_only_one_of_the_ids() {
+        // No listing is filed under both at once, so requiring both matches
+        // nothing at all.
+        let got = build_stat_filters(
+            &impale(),
+            None,
+            &two_id_table(),
+            StatFilterOptions::default(),
+        );
+
+        assert_eq!(got.counts[0].value.min, Some(1.0));
+    }
+
+    #[test]
+    fn a_count_group_carries_every_id() {
+        let got = build_stat_filters(
+            &impale(),
+            None,
+            &two_id_table(),
+            StatFilterOptions::default(),
+        );
+
+        let ids: Vec<&str> = got.counts[0]
+            .filters
+            .iter()
+            .map(|f| f.id.as_str())
+            .collect();
+
+        assert_eq!(ids, vec!["explicit.stat_a", "explicit.stat_b"]);
+    }
+
+    #[test]
+    fn every_id_in_a_count_group_carries_the_same_roll() {
+        // They are one stat printed one way. A range on only the first would
+        // let the second match any roll.
+        let got = build_stat_filters(
+            &impale(),
+            None,
+            &two_id_table(),
+            StatFilterOptions::default(),
+        );
+
+        let first = &got.counts[0].filters[0];
+
+        for filter in &got.counts[0].filters {
+            assert_eq!(filter.range, first.range);
+        }
+    }
+
+    #[test]
+    fn a_stat_with_two_ids_is_not_also_in_the_and_group() {
+        // It would then be required as well as counted, which is the bug the
+        // count group exists to avoid.
+        let got = build_stat_filters(
+            &impale(),
+            None,
+            &two_id_table(),
+            StatFilterOptions::default(),
+        );
+
+        assert_eq!(got.and, None);
+    }
+
+    #[test]
+    fn a_stat_with_one_id_stays_in_the_and_group() {
+        let mods = vec![modifier(
+            ModifierType::Explicit,
+            "# to maximum Life",
+            roll(50.0),
+        )];
+
+        let got = build_stat_filters(&mods, None, &life_table(), StatFilterOptions::default());
+
+        assert!(got.counts.is_empty());
+        assert_eq!(got.and.unwrap().filters.len(), 1);
     }
 
     #[test]

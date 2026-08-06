@@ -348,6 +348,12 @@ pub struct ParsedItem {
     /// What a heist contract demands. PoE1 only.
     pub heist_contract: Option<HeistContract>,
     pub trials: Option<Trials>,
+    /// The unique a Valdo's map pays out on completion. PoE1 only.
+    ///
+    /// The name of the reward, as printed. A map with one is bought for the
+    /// reward and not for its own modifiers, which is why the ordinary map
+    /// property filters are skipped for it.
+    pub map_completion_reward: Option<String>,
     /// The memory strands an accessory carries. PoE1 only.
     ///
     /// A number the game prints on its own line, not a modifier, so it never

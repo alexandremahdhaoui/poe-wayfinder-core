@@ -10,7 +10,7 @@ use crate::types::client_strings as cs;
 use crate::types::item::{Heist, HeistTarget, ItemRarity, Trials, UltimatumHint};
 use crate::util::number::leading_int;
 
-/// `Map Tier: 16`.
+/// `Map Tier: 16`, and the completion reward a Valdo's map pays out.
 pub fn parse_map(section: &[String], state: &mut ParserState) -> ParseOutcome {
     let Some(first) = section.first() else {
         return ParseOutcome::SectionSkipped;
@@ -20,6 +20,16 @@ pub fn parse_map(section: &[String], state: &mut ParserState) -> ParseOutcome {
         state.item.map.tier = leading_int(rest).map(|v| v as u32);
 
         return ParseOutcome::SectionParsed;
+    }
+
+    // A Valdo's map. It is bought for the reward and not for its own
+    // modifiers, so the reward has to be read before anything prices it.
+    for line in section {
+        if let Some(reward) = line.strip_prefix(cs::MAP_COMPLETION_REWARD) {
+            state.item.map_completion_reward = Some(reward.to_string());
+
+            return ParseOutcome::SectionParsed;
+        }
     }
 
     ParseOutcome::SectionSkipped

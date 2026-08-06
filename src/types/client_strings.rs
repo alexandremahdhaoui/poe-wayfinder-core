@@ -234,6 +234,7 @@ pub const ITEM_VESTIGIAL: &str = "Vestigial ";
 // ---------------------------------------------------------------------------
 
 pub const SPLIT: &str = "Split";
+pub const MAP_COMPLETION_REWARD: &str = "Reward: Foil ";
 pub const MEMORY_STRANDS: &str = "Memory Strands: ";
 pub const HEIST_CONTRACT_REQUIRES: &str = "Requires ";
 pub const HEIST_CONTRACT_TARGET: &str = "Heist Target: ";

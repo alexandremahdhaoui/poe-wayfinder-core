@@ -13,7 +13,7 @@ use crate::controller::filter::item_filters::{build_query, FilterOptions};
 use crate::controller::filter::presets::{
     gem_level_filter, preset_for, trials_filter, uses_item_properties, uses_modifiers,
 };
-use crate::controller::filter::stat_filters::{build_stat_group_for, StatFilterOptions};
+use crate::controller::filter::stat_filters::{build_stat_filters, StatFilterOptions};
 use crate::controller::parse::{parse_clipboard, ParseError};
 use crate::types::game::GameVersion;
 use crate::types::item::ParsedItem;
@@ -129,12 +129,23 @@ pub fn price_check(
     if uses_modifiers(preset) {
         let properties = uses_item_properties(preset).then_some(&item);
 
-        if let Some(group) = build_stat_group_for(&item.modifiers, properties, data, stats) {
-            query.stats.push(group);
-        }
+        let built = build_stat_filters(&item.modifiers, properties, data, stats);
+
+        query.stats.extend(built.and);
+        // A stat filed under several trade ids travels as its own count group.
+        // Folding it into the `and` group would require one listing to be
+        // filed under two ids at once, which no listing is.
+        query.stats.extend(built.counts);
     }
 
     apply_heist_rules(&item, data, &mut query);
+    apply_exclusions(&item, data, &mut query);
+
+    if let Some(filter) = crate::controller::filter::exclusions::memory_strands_filter(&item) {
+        query
+            .stats
+            .push(crate::types::query::StatGroup::all(vec![filter]));
+    }
 
     let route = RouteFacts {
         trade_tag: item.info.trade_tag.clone(),
@@ -162,6 +173,52 @@ pub fn price_check(
         query,
         endpoint,
     })
+}
+
+/// Add the `not` group, if anything about this item calls for one.
+///
+/// An exclusion says a modifier must not be there. No filter built from what
+/// an item has can say that, so these two rules read what the item is missing.
+fn apply_exclusions(item: &ParsedItem, data: &dyn GameData, query: &mut TradeQuery) {
+    use crate::controller::filter::exclusions::{
+        flask_excludes_increased_effect, not_group, valdo_bad_mods, INCREASED_EFFECT,
+    };
+
+    let references: Vec<String> = item
+        .modifiers
+        .iter()
+        .flat_map(|m| &m.stats)
+        .map(|s| s.reference.clone())
+        .collect();
+
+    let mut wanted: Vec<&str> = Vec::new();
+
+    if flask_excludes_increased_effect(item, &references) {
+        wanted.push(INCREASED_EFFECT);
+    }
+
+    wanted.extend(valdo_bad_mods(item, &references));
+
+    // Explicit, because that is where both modifiers live. A stat with no
+    // explicit id is one the site cannot exclude on, and sending an id it does
+    // not know fails the whole query.
+    let ids: Vec<String> = wanted
+        .into_iter()
+        .filter_map(|reference| {
+            data.stat_by_matcher(reference)
+                .and_then(|hit| {
+                    hit.stat
+                        .trade
+                        .ids_for(crate::types::modifier::ModifierType::Explicit)
+                })
+                .and_then(|ids| ids.first())
+                .cloned()
+        })
+        .collect();
+
+    if let Some(group) = not_group(ids) {
+        query.stats.push(group);
+    }
 }
 
 /// Add the heist filters, if this is a heist item.
