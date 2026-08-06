@@ -3,6 +3,7 @@
 pub mod aggregate;
 pub mod calc;
 pub mod filter;
+pub mod listing;
 pub mod mod_desc;
 pub mod parse;
 pub mod price_check;

@@ -91,6 +91,7 @@ pub const WAYSTONE_GOLD: &str = "Gold Found: ";
 
 pub const CORRUPTED: &str = "Corrupted";
 pub const DOUBLE_CORRUPTED: &str = "Twice Corrupted";
+pub const UNIDENTIFIED: &str = "Unidentified";
 pub const UNMODIFIABLE: &str = "Unmodifiable";
 pub const MIRRORED: &str = "Mirrored";
 pub const SANCTIFIED: &str = "Sanctified";
