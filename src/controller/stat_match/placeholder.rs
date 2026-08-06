@@ -27,6 +27,18 @@
 //!
 //! That is where the min and max on each match come from. Without it the
 //! range is unknown and the client cannot tell a good roll from a bad one.
+//!
+//! # The plus sign is part of the key
+//!
+//! Swallowing the printed `+` into the number looks harmless and is not. The
+//! trade data keys 271 PoE2 stats and 1072 PoE1 stats with the sign left in,
+//! `+# to Level of all Arc Skills` among them, and those never matched.
+//!
+//! It cannot be fixed by dropping the sign from the data either. PoE1 ships
+//! `+#% Chance to Block Spell Damage` and `#% Chance to Block Spell Damage` as
+//! two different trade stats. Merging them would price against the wrong one.
+//!
+//! So both spellings are produced, signed first, and the data file decides.
 
 use crate::types::client_strings as cs;
 
@@ -39,6 +51,11 @@ pub struct NumMatch {
     pub roll_str: String,
     /// Whether any part of the number or its range carried a decimal point.
     pub decimal: bool,
+    /// Whether the game printed an explicit `+` in front of the number.
+    ///
+    /// Kept because the data files key some stats with the sign and some
+    /// without, and the two are different stats. See `candidates`.
+    pub signed: bool,
     /// The roll's possible range, when the game printed one.
     pub bounds: Option<(f64, f64)>,
 }
@@ -137,14 +154,26 @@ pub fn candidates(stat: &str) -> Vec<Candidate> {
 
     if matches.len() < PLACEHOLDER_MAP.len() {
         for keep in PLACEHOLDER_MAP[matches.len()] {
+            let values: Vec<NumMatch> = matches
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !keep.contains(i))
+                .map(|(_, m)| m.clone())
+                .collect();
+
+            // The signed form first, because it is what the game printed. Both
+            // spellings exist in the data and they are not always the same
+            // stat, so the exact one has to win. See the doc comment.
+            if values.iter().any(|m| m.signed) {
+                out.push(Candidate {
+                    template: restore_signed(&with_placeholders, &matches, keep),
+                    values: values.clone(),
+                });
+            }
+
             out.push(Candidate {
                 template: restore(&with_placeholders, &matches, keep),
-                values: matches
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, _)| !keep.contains(i))
-                    .map(|(_, m)| m.clone())
-                    .collect(),
+                values,
             });
         }
     }
@@ -154,6 +183,38 @@ pub fn candidates(stat: &str) -> Vec<Candidate> {
         template: stat.to_string(),
         values: Vec::new(),
     });
+
+    out
+}
+
+/// The same, with the printed `+` kept in front of each placeholder.
+///
+/// `+2 to Level of all Arc Skills` is keyed as `+# to Level of all Arc Skills`
+/// and `+79 to maximum Life` is keyed as `# to maximum Life`. One data file
+/// holds both spellings, so the parser has to be able to write both.
+fn restore_signed(template: &str, matches: &[NumMatch], keep: &[usize]) -> String {
+    let mut out = String::with_capacity(template.len() + matches.len());
+    let mut idx = 0;
+
+    for c in template.chars() {
+        if c != '#' {
+            out.push(c);
+
+            continue;
+        }
+
+        if keep.contains(&idx) {
+            out.push_str(&matches[idx].roll_str);
+        } else {
+            if matches[idx].signed {
+                out.push('+');
+            }
+
+            out.push('#');
+        }
+
+        idx += 1;
+    }
 
     out
 }
@@ -240,6 +301,7 @@ fn to_template(stat: &str) -> (String, Vec<NumMatch>) {
         }
 
         matches.push(NumMatch {
+            signed: roll_str.starts_with('+'),
             roll,
             roll_str,
             decimal,
@@ -513,12 +575,76 @@ mod tests {
             vec![
                 // The number is part of the name.
                 "+25 to maximum Life",
-                // The number is a roll.
+                // The number is a roll, keyed with the sign the game printed.
+                "+# to maximum Life",
+                // The number is a roll, keyed without it.
                 "# to maximum Life",
                 // Verbatim fallback.
                 "+25 to maximum Life",
             ]
         );
+    }
+
+    #[test]
+    fn a_signed_roll_offers_the_signed_key_before_the_unsigned_one() {
+        // The data holds "+# to Level of all Arc Skills" with the sign. Only
+        // offering "# to Level of all Arc Skills" never matched it, so a wand
+        // with +2 to Arc priced against every wand on the market.
+        let got = templates("+2 to Level of all Arc Skills");
+
+        let signed = got
+            .iter()
+            .position(|t| t == "+# to Level of all Arc Skills");
+        let plain = got.iter().position(|t| t == "# to Level of all Arc Skills");
+
+        assert!(signed.is_some(), "{got:?}");
+        assert!(plain.is_some(), "{got:?}");
+        assert!(
+            signed < plain,
+            "the signed key must be tried first: {got:?}"
+        );
+    }
+
+    #[test]
+    fn an_unsigned_roll_offers_no_signed_key() {
+        // "#% Chance to Block Spell Damage" and "+#% Chance to Block Spell
+        // Damage" are two different trade stats in PoE1. A line printed without
+        // a sign must never reach the signed one.
+        let got = templates("25% Chance to Block Spell Damage");
+
+        assert!(
+            !got.iter().any(|t| t.contains('+')),
+            "an unsigned line produced a signed key: {got:?}"
+        );
+    }
+
+    #[test]
+    fn a_negative_roll_offers_no_signed_key() {
+        // The data files key nothing with "-#", so producing that variant would
+        // only add a lookup that can never hit.
+        let got = templates("-15% to Fire Resistance");
+
+        assert!(
+            !got.iter().any(|t| t.contains("-#")),
+            "a negative line produced a -# key: {got:?}"
+        );
+    }
+
+    #[test]
+    fn the_sign_is_recorded_on_the_number_it_belongs_to() {
+        let (_, m) = to_template("Adds +5 to 12 Fire Damage");
+
+        assert!(m[0].signed);
+        assert!(!m[1].signed, "the unsigned second roll was marked signed");
+    }
+
+    #[test]
+    fn a_kept_literal_keeps_its_printed_sign_in_the_signed_form() {
+        // restore_signed writes roll_str for kept indices. Writing "+" and then
+        // "+25" would give "++25".
+        let got = templates("+25 to maximum Life");
+
+        assert!(!got.iter().any(|t| t.contains("++")), "{got:?}");
     }
 
     #[test]

@@ -286,7 +286,13 @@ pub fn pseudo_totals(totals: &[StatTotal]) -> Vec<PseudoTotal> {
         let mut missing_required = false;
 
         for contributor in rule.stats {
-            let found = totals.iter().find(|t| t.reference == contributor.reference);
+            // Sign insensitive, because the two games spell the same stat
+            // differently. PoE1 calls it `+# to maximum Life` and PoE2 calls it
+            // `# to maximum Life`. Comparing outright gave PoE1 no pseudo
+            // totals at all, which is most of what a PoE1 search is.
+            let found = totals
+                .iter()
+                .find(|t| signs_match(&t.reference, contributor.reference));
 
             let Some(total) = found else {
                 if contributor.required {
@@ -420,6 +426,47 @@ mod tests {
 
     fn find<'a>(totals: &'a [PseudoTotal], reference: &str) -> Option<&'a PseudoTotal> {
         totals.iter().find(|t| t.reference == reference)
+    }
+
+    #[test]
+    fn the_poe1_spelling_of_a_contributor_still_feeds_its_total() {
+        // PoE1 names the stat `+#% to Fire Resistance` and PoE2 names it
+        // `#% to Fire Resistance`. Matching the string outright gave a PoE1
+        // item no pseudo totals at all.
+        let got = pseudo_totals(&[total("+#% to Fire Resistance", 30.0)]);
+
+        assert_eq!(
+            find(&got, "+#% total to Fire Resistance")
+                .unwrap()
+                .roll
+                .value,
+            30.0
+        );
+    }
+
+    #[test]
+    fn the_poe1_spelling_satisfies_a_required_contributor() {
+        // Life is only offered when a real life modifier is present. Reading
+        // the PoE1 spelling as absent suppressed the single most searched
+        // filter in the game.
+        let got = pseudo_totals(&[
+            total("+# to maximum Life", 79.0),
+            total("+# to Strength", 20.0),
+        ]);
+
+        assert_eq!(
+            find(&got, "+# total maximum Life").unwrap().roll.value,
+            79.0 + 40.0
+        );
+    }
+
+    #[test]
+    fn a_missing_life_modifier_is_still_missing_in_the_poe1_spelling() {
+        // The sign tolerance must not turn into matching anything. Strength
+        // alone is not life in either game.
+        let got = pseudo_totals(&[total("+# to Strength", 20.0)]);
+
+        assert!(find(&got, "+# total maximum Life").is_none());
     }
 
     #[test]

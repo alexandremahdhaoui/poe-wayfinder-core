@@ -98,6 +98,7 @@ pub fn parse_roll(hit: &StatHit, candidate: &Candidate, stat: &StatString) -> Op
             roll: baked,
             roll_str: baked.to_string(),
             decimal: false,
+            signed: false,
             bounds: Some((baked, baked)),
         });
     }
