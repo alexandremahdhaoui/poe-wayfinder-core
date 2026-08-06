@@ -58,6 +58,28 @@ pub struct PriceCheck {
 }
 
 impl PriceCheck {
+    /// Whether the query narrows the search at all.
+    ///
+    /// # Why this has to be checked
+    ///
+    /// A query with no name, no base type, no stat filter and no property
+    /// filter matches every item on the trade site. The user sees a price and
+    /// nothing tells them it is the price of the whole market.
+    ///
+    /// It happens for a real reason: the base type comes from the data file,
+    /// so a stale or missing one leaves the query empty while the parse still
+    /// succeeds. Refusing is the only honest answer.
+    pub fn constrains_something(&self) -> bool {
+        // A category or a rarity does not count. "Any non unique ring that is
+        // not corrupted" is most of the market, and a price built from it is
+        // the market's median rather than this item's price.
+        self.query.name.is_some()
+            || self.query.type_name.is_some()
+            || self.query.stats.iter().any(|g| !g.filters.is_empty())
+    }
+}
+
+impl PriceCheck {
     /// How many stat filters the query carries.
     pub fn stat_filter_count(&self) -> usize {
         self.query.stats.iter().map(|g| g.filters.len()).sum()
