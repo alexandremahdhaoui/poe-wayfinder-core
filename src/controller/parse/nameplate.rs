@@ -84,14 +84,33 @@ pub fn parse_name_plate(section: &[String]) -> Result<NamePlate, ParseError> {
         return Err(ParseError::BadNamePlate);
     }
 
-    let mut item = ParsedItem::default();
+    // The class line names the category for every item the game prints.
+    //
+    // The data file only covers the bases the trade API names finely, which is
+    // 810 of 3578. Without this a bow has no category, so the search carries no
+    // category filter and returns every item of every kind that happens to
+    // share a modifier.
+    //
+    // The database stage overwrites this when the data file has an answer,
+    // because the data file knows things the class line cannot say.
+    let mut item = ParsedItem {
+        category: class_line
+            .strip_prefix(cs::ITEM_CLASS)
+            .and_then(crate::types::category::from_item_class),
+        ..ParsedItem::default()
+    };
 
     let mut next = lines.next();
 
     if let Some(line) = next {
         if let Some(rarity_text) = line.strip_prefix(cs::RARITY) {
             item.rarity = rarity_from_rarity_text(rarity_text);
-            item.category = category_from_rarity_text(rarity_text);
+
+            // A rarity that names a category wins. "Rarity: Currency" is more
+            // specific than the class line for the things that print it.
+            if let Some(category) = category_from_rarity_text(rarity_text) {
+                item.category = Some(category);
+            }
 
             next = lines.next();
         }
@@ -361,7 +380,10 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_rarity_word_sets_neither_field() {
+    fn an_unknown_rarity_word_leaves_the_rarity_unset() {
+        // A rarity word this build does not know is reported as no rarity
+        // rather than guessed. The category still comes from the class line,
+        // which the game prints regardless of what the rarity says.
         let plate = parse_name_plate(&lines(&[
             "Item Class: Rings",
             "Rarity: Legendary",
@@ -370,7 +392,61 @@ mod tests {
         .unwrap();
 
         assert_eq!(plate.item.rarity, None);
+        assert_eq!(plate.item.category, Some(ItemCategory::Ring));
+    }
+
+    #[test]
+    fn the_class_line_names_the_category() {
+        // The data file only covers the bases the trade API names finely, 810
+        // of 3578. Without this a bow carries no category and the search sends
+        // no category filter at all.
+        for (class, expected) in [
+            ("Bows", ItemCategory::Bow),
+            ("Body Armours", ItemCategory::BodyArmour),
+            ("Two Hand Maces", ItemCategory::TwoHandedMace),
+            ("Rings", ItemCategory::Ring),
+            ("Foci", ItemCategory::Focus),
+            ("Crossbows", ItemCategory::Crossbow),
+        ] {
+            let plate = parse_name_plate(&lines(&[
+                &format!("Item Class: {class}"),
+                "Rarity: Rare",
+                "Doom Thing",
+                "Some Base",
+            ]))
+            .unwrap();
+
+            assert_eq!(plate.item.category, Some(expected), "{class}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_class_leaves_the_category_unset() {
+        // A wrong category sends the search to the wrong part of the site and
+        // returns nothing, which reads as the item being unpriceable.
+        let plate = parse_name_plate(&lines(&[
+            "Item Class: Brand New Slot",
+            "Rarity: Rare",
+            "Doom Thing",
+            "Some Base",
+        ]))
+        .unwrap();
+
         assert_eq!(plate.item.category, None);
+    }
+
+    #[test]
+    fn a_rarity_that_names_a_category_beats_the_class_line() {
+        // "Rarity: Currency" is more specific than the class line for the
+        // things that print it.
+        let plate = parse_name_plate(&lines(&[
+            "Item Class: Stackable Currency",
+            "Rarity: Currency",
+            "Divine Orb",
+        ]))
+        .unwrap();
+
+        assert_eq!(plate.item.category, Some(ItemCategory::Currency));
     }
 
     #[test]

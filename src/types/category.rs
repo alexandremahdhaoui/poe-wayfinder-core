@@ -76,6 +76,93 @@ pub enum ItemCategory {
     Wombgift,
 }
 
+/// What the game's own item class line means.
+///
+/// Ported from the class names the game prints, checked against the classes in
+/// the upstream fixture set.
+///
+/// # Why this exists alongside the data file
+///
+/// The trade API groups items coarsely. It says `weapon` and `armour`, not
+/// `bow` and `boots`, so the category we build from it is absent for most
+/// bases: 810 of 3578 on the last data build.
+///
+/// The game prints the exact class on every single item. Reading it here gives
+/// a category for items the data file cannot cover, which is what makes the
+/// category filter work on a bow at all.
+///
+/// The data file still wins where it has an answer. It knows things the class
+/// line cannot express, such as which jewel is a cluster jewel.
+pub fn from_item_class(class: &str) -> Option<ItemCategory> {
+    use ItemCategory::*;
+
+    // Plural, as the game writes them. A singular spelling here silently
+    // matches nothing, which is the failure this whole map exists to fix.
+    Some(match class.trim() {
+        // One handed
+        "Claws" => Claw,
+        "Daggers" => Dagger,
+        "Rune Daggers" => RuneDagger,
+        "Wands" => Wand,
+        "One Hand Swords" | "Thrusting One Hand Swords" => OneHandedSword,
+        "One Hand Axes" => OneHandedAxe,
+        "One Hand Maces" => OneHandedMace,
+        "Sceptres" => Sceptre,
+        "Spears" => Spear,
+        "Flails" => Flail,
+
+        // Two handed
+        "Bows" => Bow,
+        "Staves" => Staff,
+        "Two Hand Swords" => TwoHandedSword,
+        "Two Hand Axes" => TwoHandedAxe,
+        "Two Hand Maces" => TwoHandedMace,
+        "Warstaves" | "Quarterstaves" => Warstaff,
+        "Crossbows" => Crossbow,
+        "Fishing Rods" => FishingRod,
+
+        // Offhand
+        "Quivers" => Quiver,
+        "Shields" => Shield,
+        "Foci" => Focus,
+        "Bucklers" => Buckler,
+
+        // Jewellery
+        "Amulets" => Amulet,
+        "Rings" => Ring,
+        "Belts" => Belt,
+        "Trinkets" => Trinket,
+        "Talismans" => Talisman,
+
+        // Armour
+        "Body Armours" => BodyArmour,
+        "Helmets" => Helmet,
+        "Gloves" => Gloves,
+        "Boots" => Boots,
+
+        // Consumables and the rest
+        "Life Flasks" | "Mana Flasks" | "Hybrid Flasks" | "Utility Flasks" => Flask,
+        "Charms" => Charm,
+        "Jewels" => Jewel,
+        "Abyss Jewels" => AbyssJewel,
+        "Maps" | "Waystones" => Map,
+        "Stackable Currency" | "Currency" => Currency,
+        "Divination Cards" => DivinationCard,
+        "Relics" => SanctumRelic,
+        "Tablet" | "Tablets" => Tablet,
+
+        // A gem class this build does not split further. All three are gems to
+        // the trade site.
+        "Skill Gems" | "Support Gems" | "Uncut Skill Gems" | "Uncut Support Gems"
+        | "Uncut Spirit Gems" => Gem,
+
+        // An unknown class is reported as unknown rather than guessed. A wrong
+        // category sends the search to the wrong part of the site and returns
+        // nothing, which reads as the item being unpriceable.
+        _ => return None,
+    })
+}
+
 impl ItemCategory {
     /// The trade site spelling.
     pub fn as_str(self) -> &'static str {

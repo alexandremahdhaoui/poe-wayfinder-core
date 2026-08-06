@@ -283,3 +283,27 @@ fn a_fixture_with_every_line_repeated_still_prices() {
         assert!(got.is_ok() || got.is_err(), "{name}");
     }
 }
+
+#[test]
+fn most_upstream_items_now_carry_a_category() {
+    // The data file names a category for 810 of 3578 bases, because the trade
+    // API groups items coarsely: it says weapon, not bow. The class line the
+    // game prints on every item fills the rest.
+    //
+    // Without a category the query carries no category filter and returns
+    // every kind of item that happens to share a modifier.
+    let with_category = fixtures()
+        .into_iter()
+        .filter(|(_, text)| {
+            price_check(text, &NO_DATA, PriceCheckOptions::new(GameVersion::Poe2))
+                .is_ok_and(|c| c.item.category.is_some())
+        })
+        .count();
+
+    // NO_DATA supplies nothing, so every category here came from the class
+    // line alone.
+    assert!(
+        with_category >= 20,
+        "only {with_category} of 26 fixtures got a category with no data file"
+    );
+}
