@@ -101,19 +101,35 @@ pub fn find_in_database(state: &mut ParserState<'_>) -> Result<(), ParseError> {
 
     let found = state.data.items_by_name(&key, namespace, state.game);
 
-    let Some(base) = pick_variant(state, found) else {
-        return Ok(());
-    };
+    if let Some(base) = pick_variant(state, found) {
+        // The category from the data file wins. The item class line names a
+        // class, not a trade category, and the two do not line up.
+        if let Some(category) = base.category {
+            state.item.category = Some(category);
+        }
 
-    // The category from the data file wins. The item class line names a class,
-    // not a trade category, and the two do not line up.
-    if let Some(category) = base.category {
-        state.item.category = Some(category);
+        state.item.info = base;
     }
 
-    state.item.info = base;
+    // After the lookup, and outside it. A unique the table does not know yet
+    // still printed its base, and that is still what the query needs. The
+    // assignment above would otherwise overwrite it.
+    remember_unique_base(state);
 
     Ok(())
+}
+
+/// Keep the base type a unique is built on.
+///
+/// The unique's own entry names the unique. The trade query needs the base, so
+/// the line the game prints under the name is kept. Without it a unique
+/// searches with its own name as the type and matches nothing.
+fn remember_unique_base(state: &mut ParserState<'_>) {
+    if state.item.rarity != Some(ItemRarity::Unique) || state.item.is_unidentified {
+        return;
+    }
+
+    state.item.info.unique_base = state.base_type.clone();
 }
 
 /// Which table to search and with what name.
@@ -356,6 +372,72 @@ mod tests {
 
         // The unique table won, not the item table.
         assert_eq!(s.item.category, Some(ItemCategory::BodyArmour));
+    }
+
+    #[test]
+    fn a_unique_keeps_the_base_type_printed_under_its_name() {
+        // The unique's own entry names the unique twice over. The base is only
+        // in the clipboard, and the trade query needs it.
+        let data = table(vec![(
+            Namespace::Unique,
+            base("Kaom's Heart", Some(ItemCategory::BodyArmour)),
+        )]);
+        let mut s = state_with(&data, "Kaom's Heart");
+        s.base_type = Some("Glorious Plate".into());
+        s.item.rarity = Some(ItemRarity::Unique);
+
+        find_in_database(&mut s).unwrap();
+
+        assert_eq!(s.item.info.unique_base.as_deref(), Some("Glorious Plate"));
+    }
+
+    #[test]
+    fn a_unique_the_data_does_not_know_still_keeps_its_base() {
+        // A new league's uniques are missing from the table for a few days.
+        // The base is still on the clipboard and still worth sending.
+        let data = table(vec![]);
+        let mut s = state_with(&data, "Brand New Unique");
+        s.base_type = Some("Glorious Plate".into());
+        s.item.rarity = Some(ItemRarity::Unique);
+
+        find_in_database(&mut s).unwrap();
+
+        assert_eq!(s.item.info.unique_base.as_deref(), Some("Glorious Plate"));
+    }
+
+    #[test]
+    fn a_rare_keeps_no_unique_base() {
+        // The field decides how the query is typed. Setting it on a rare would
+        // send the base as a unique's base and drop the rarity filter.
+        let data = table(vec![(
+            Namespace::Item,
+            base("Glorious Plate", Some(ItemCategory::BodyArmour)),
+        )]);
+        let mut s = state_with(&data, "Vengeance Wall");
+        s.base_type = Some("Glorious Plate".into());
+        s.item.rarity = Some(ItemRarity::Rare);
+
+        find_in_database(&mut s).unwrap();
+
+        assert_eq!(s.item.info.unique_base, None);
+    }
+
+    #[test]
+    fn an_unidentified_unique_keeps_no_base_of_its_own() {
+        // It is already looked up by its base, so its info is the base. Naming
+        // it again as a unique base would search for a unique that has no name
+        // yet.
+        let data = table(vec![(
+            Namespace::Item,
+            base("Glorious Plate", Some(ItemCategory::BodyArmour)),
+        )]);
+        let mut s = state_with(&data, "Glorious Plate");
+        s.item.rarity = Some(ItemRarity::Unique);
+        s.item.is_unidentified = true;
+
+        find_in_database(&mut s).unwrap();
+
+        assert_eq!(s.item.info.unique_base, None);
     }
 
     #[test]

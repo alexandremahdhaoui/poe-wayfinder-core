@@ -79,8 +79,12 @@ fn apply_identity(item: &ParsedItem, query: &mut TradeQuery) {
         Some(ItemRarity::Unique) if !item.is_unidentified => {
             query.name = Some(NameField::new(&item.info.name, None));
 
-            if !item.info.reference_name.is_empty() {
-                query.type_name = Some(NameField::new(&item.info.reference_name, discriminator));
+            // The base, not the unique's own name. `Kaom's Heart` is a name
+            // and `Glorious Plate` is a type, and sending the first as the
+            // type matches nothing. When the base is unknown the type is left
+            // off, because the name alone still finds the item.
+            if let Some(base) = &item.info.unique_base {
+                query.type_name = Some(NameField::new(base, discriminator));
             }
         }
         _ => {
@@ -367,8 +371,12 @@ mod tests {
             rarity: Some(ItemRarity::Unique),
             category: Some(ItemCategory::BodyArmour),
             info: BaseInfo {
+                // What the parser actually produces. The unique's entry names
+                // the unique in both fields, and the base comes from the line
+                // under it.
                 name: "Kaom's Heart".into(),
-                reference_name: "Glorious Plate".into(),
+                reference_name: "Kaom's Heart".into(),
+                unique_base: Some("Glorious Plate".into()),
                 ..BaseInfo::default()
             },
             ..ParsedItem::default()
@@ -380,6 +388,50 @@ mod tests {
         assert_eq!(q.type_name.as_ref().unwrap().name(), "Glorious Plate");
         // A unique search must not exclude uniques.
         assert_eq!(q.filters.type_filters.rarity, None);
+    }
+
+    #[test]
+    fn a_unique_never_sends_its_own_name_as_the_type() {
+        // No base is called Kaom's Heart, so a query typed that way matches
+        // nothing. This is what the overlay sent for every unique in both
+        // games.
+        let item = ParsedItem {
+            rarity: Some(ItemRarity::Unique),
+            category: Some(ItemCategory::BodyArmour),
+            info: BaseInfo {
+                name: "Kaom's Heart".into(),
+                reference_name: "Kaom's Heart".into(),
+                unique_base: Some("Glorious Plate".into()),
+                ..BaseInfo::default()
+            },
+            ..ParsedItem::default()
+        };
+
+        let q = build_query(&item, FilterOptions::default());
+
+        assert_ne!(q.type_name.as_ref().unwrap().name(), "Kaom's Heart");
+    }
+
+    #[test]
+    fn a_unique_whose_base_is_unknown_searches_by_name_alone() {
+        // A name with no type still finds the item. A name with a wrong type
+        // finds nothing, so leaving the type off is the safe answer.
+        let item = ParsedItem {
+            rarity: Some(ItemRarity::Unique),
+            category: Some(ItemCategory::BodyArmour),
+            info: BaseInfo {
+                name: "Kaom's Heart".into(),
+                reference_name: "Kaom's Heart".into(),
+                unique_base: None,
+                ..BaseInfo::default()
+            },
+            ..ParsedItem::default()
+        };
+
+        let q = build_query(&item, FilterOptions::default());
+
+        assert_eq!(q.name.as_ref().unwrap().name(), "Kaom's Heart");
+        assert_eq!(q.type_name, None);
     }
 
     #[test]

@@ -288,6 +288,18 @@ pub struct BaseInfo {
     /// not line up. The data file holds the mapping, so the parser reads the
     /// category from the base rather than guessing from the class line.
     pub category: Option<ItemCategory>,
+    /// The base type a unique is built on.
+    ///
+    /// The reference reads this from its data file as `info.unique.base` and
+    /// sends it as the query's type. A unique searched with its own name as
+    /// the type returns nothing, because no base is called `Kaom's Heart`.
+    ///
+    /// Our data file has no such field, so it is read from the base type line
+    /// the game prints under the unique's name. English only, so that line is
+    /// the base's real name and needs no translating.
+    ///
+    /// None for anything that is not a unique.
+    pub unique_base: Option<String>,
 }
 
 /// One parsed item.
