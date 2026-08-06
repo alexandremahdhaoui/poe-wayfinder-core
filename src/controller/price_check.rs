@@ -134,6 +134,8 @@ pub fn price_check(
         }
     }
 
+    apply_heist_rules(&item, data, &mut query);
+
     let route = RouteFacts {
         trade_tag: item.info.trade_tag.clone(),
         category: item.category,
@@ -160,6 +162,45 @@ pub fn price_check(
         query,
         endpoint,
     })
+}
+
+/// Add the heist filters, if this is a heist item.
+///
+/// PoE1 only. Kept out of the stat group builder because a contract's job is
+/// not a modifier and a blueprint's exclusion is a group of its own rather
+/// than a filter inside the `and` group.
+fn apply_heist_rules(item: &ParsedItem, data: &dyn GameData, query: &mut TradeQuery) {
+    use crate::controller::filter::heist::{blueprint_exclusion, contract_filters, ENCHANT_MODS};
+
+    let filters = contract_filters(item);
+
+    if !filters.is_empty() {
+        query
+            .stats
+            .push(crate::types::query::StatGroup::all(filters));
+    }
+
+    // The enchant count stat, looked up here rather than in the rule, because
+    // the rule takes no data and a filter with no trade id fails the query.
+    let enchant_id = data
+        .stat_by_matcher(ENCHANT_MODS)
+        .and_then(|hit| {
+            hit.stat
+                .trade
+                .ids_for(crate::types::modifier::ModifierType::Pseudo)
+        })
+        .and_then(|ids| ids.first())
+        .cloned();
+
+    let has_enchant_filters = query
+        .stats
+        .iter()
+        .flat_map(|group| &group.filters)
+        .any(|filter| filter.id.starts_with("enchant."));
+
+    if let Some(group) = blueprint_exclusion(item, has_enchant_filters, enchant_id.as_deref()) {
+        query.stats.push(group);
+    }
 }
 
 #[cfg(test)]

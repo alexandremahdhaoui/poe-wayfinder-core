@@ -15,6 +15,7 @@
 pub mod magic_name;
 pub mod nameplate;
 pub mod pipeline;
+pub mod poe1;
 pub mod sections;
 pub mod shared;
 

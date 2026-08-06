@@ -223,6 +223,42 @@ pub const MAP_BLIGHT_RAVAGED: &str = "Blight-ravaged ";
 pub const QUALITY_ANOMALOUS: &str = "Anomalous ";
 pub const QUALITY_DIVERGENT: &str = "Divergent ";
 pub const QUALITY_PHANTASMAL: &str = "Phantasmal ";
+pub const ITEM_FOULBORN: &str = "Foulborn ";
+pub const ITEM_VESTIGIAL: &str = "Vestigial ";
+
+// ---------------------------------------------------------------------------
+// PoE1 only lines
+//
+// Exiled Exchange 2 is a PoE2 fork and dropped every one of these. They come
+// from Awakened PoE Trade's client strings.
+// ---------------------------------------------------------------------------
+
+pub const SPLIT: &str = "Split";
+pub const MEMORY_STRANDS: &str = "Memory Strands: ";
+pub const HEIST_CONTRACT_REQUIRES: &str = "Requires ";
+pub const HEIST_CONTRACT_TARGET: &str = "Heist Target: ";
+pub const HEIST_TARGET_PRICELESS: &str = "Priceless";
+
+/// The nine heist jobs, in the reference's order.
+///
+/// Each pairs the printed name with the trade id the site files it under. The
+/// site calls them `item.heist_job_*` with the spaces and the hyphen removed,
+/// which is not derivable from the name and is why both halves are written
+/// out.
+pub const HEIST_JOBS: [(&str, &str); 9] = [
+    ("Lockpicking", "item.heist_job_lockpicking"),
+    ("Brute Force", "item.heist_job_bruteforce"),
+    ("Perception", "item.heist_job_perception"),
+    ("Demolition", "item.heist_job_demolition"),
+    ("Counter-Thaumaturgy", "item.heist_job_counterthaumaturgy"),
+    ("Trap Disarmament", "item.heist_job_trapdisarmament"),
+    ("Agility", "item.heist_job_agility"),
+    ("Deception", "item.heist_job_deception"),
+    ("Engineering", "item.heist_job_engineering"),
+];
+
+/// The trade id for a contract whose target is priceless.
+pub const HEIST_TARGET_PRICELESS_ID: &str = "item.heist_target_priceless";
 
 // ---------------------------------------------------------------------------
 // Metamorph organ suffixes

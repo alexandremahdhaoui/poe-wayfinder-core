@@ -11,6 +11,7 @@
 
 use crate::types::game::GameVersion;
 
+use super::poe1::legacy;
 use super::shared::{
     combat, content, database, flags, levels, misc, modifiers, sockets, special, variant,
 };
@@ -124,15 +125,50 @@ fn modifier_stages_poe2() -> Vec<Stage> {
 }
 
 /// The PoE1 pipeline.
+///
+/// The nine legacy stages read lines PoE2 never prints. Exiled Exchange 2
+/// dropped all nine, so porting only that reference left PoE1 unable to read
+/// a heist contract, a split item, a tincture or a map's tier suffix.
 fn poe1() -> Vec<Stage> {
-    let mut out = preamble();
+    let mut out = preamble_poe1();
     out.extend(body());
-    out.extend([Stage::Section(misc::parse_timelost_radius)]);
+
+    out.extend([
+        Stage::Section(legacy::parse_accessory),
+        Stage::Section(legacy::parse_tincture),
+        Stage::Section(legacy::parse_imbued_gem),
+        Stage::Section(legacy::parse_heist_contract),
+        Stage::Section(legacy::parse_split),
+        Stage::Section(misc::parse_timelost_radius),
+    ]);
+
     out.extend(special_base_stages());
     out.extend(modifier_stages());
     out.extend(derived_stages());
 
     out
+}
+
+/// The preamble with the three PoE1 name plate stages in place.
+///
+/// Written out rather than spliced into the shared list, because the order is
+/// the whole point and a reader has to be able to see it. Foulborn and
+/// Vestigial run before anything reads the name, and the tier suffix comes off
+/// before the database lookup, so the lookup sees the name the data file uses.
+fn preamble_poe1() -> Vec<Stage> {
+    vec![
+        Stage::Section(flags::parse_unidentified),
+        Stage::Virtual(content::parse_superior),
+        Stage::Virtual(content::parse_exceptional),
+        Stage::Virtual(content::parse_runeforged),
+        Stage::Virtual(legacy::parse_foulborn),
+        Stage::Virtual(legacy::parse_vestigial),
+        Stage::Section(flags::parse_synthesised),
+        Stage::Section(content::parse_category_by_help_text),
+        Stage::Virtual(legacy::parse_map_tier),
+        Stage::Virtual(database::normalize_name),
+        Stage::Virtual(database::find_in_database),
+    ]
 }
 
 /// The PoE2 pipeline.

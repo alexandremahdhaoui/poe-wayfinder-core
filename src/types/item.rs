@@ -227,6 +227,23 @@ pub struct Heist {
     pub target: Option<HeistTarget>,
 }
 
+/// What a heist contract demands.
+///
+/// PoE1 only. The job and its level are most of what a contract is worth,
+/// because a buyer wants one job at one level and nothing else will do.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HeistContract {
+    /// The job the contract requires, as the game prints it.
+    pub required_job: Option<String>,
+    /// The level that job must be at.
+    pub job_level: Option<u32>,
+    /// Whether the target is the priceless one.
+    ///
+    /// The trade site has a filter of its own for it, because a priceless
+    /// target is worth more than the rest put together.
+    pub priceless: bool,
+}
+
 /// Attribute and level requirements.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Requirements {
@@ -328,7 +345,14 @@ pub struct ParsedItem {
     pub stack_size: Option<StackSize>,
     pub requires: Option<Requirements>,
     pub heist: Option<Heist>,
+    /// What a heist contract demands. PoE1 only.
+    pub heist_contract: Option<HeistContract>,
     pub trials: Option<Trials>,
+    /// The memory strands an accessory carries. PoE1 only.
+    ///
+    /// A number the game prints on its own line, not a modifier, so it never
+    /// reaches the query unless it is read here.
+    pub memory_strands: Option<u32>,
 
     pub is_unidentified: bool,
     pub is_corrupted: bool,
@@ -339,6 +363,17 @@ pub struct ParsedItem {
     pub is_fractured: bool,
     pub is_veiled: bool,
     pub is_foil: bool,
+    /// The item was split by a Fracturing Orb. PoE1 only.
+    ///
+    /// A split item cannot be split again, which is why the trade site indexes
+    /// it and why a buyer filters on it.
+    pub is_split: bool,
+    /// A Vestigial unique. PoE1 only.
+    pub is_vestigial: bool,
+    /// A Foulborn unique. PoE1 only.
+    pub is_foulborn: bool,
+    /// A gem carrying an imbued support. PoE1 only.
+    pub is_imbued_gem: bool,
 
     pub influences: Vec<Influence>,
     pub sentinel_charge: Option<u32>,
