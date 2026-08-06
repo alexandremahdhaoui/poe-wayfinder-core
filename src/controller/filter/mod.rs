@@ -12,6 +12,7 @@ pub mod item_filters;
 pub mod item_property;
 pub mod presets;
 pub mod pseudo;
+pub mod roll_math;
 pub mod rules;
 pub mod slots;
 pub mod stat_filters;

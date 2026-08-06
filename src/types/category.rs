@@ -216,6 +216,11 @@ impl ItemCategory {
         )
     }
 
+    /// Bases a catalyst can scale.
+    pub fn is_ring_or_amulet(self) -> bool {
+        matches!(self, ItemCategory::Ring | ItemCategory::Amulet)
+    }
+
     /// Rings, amulets, belts and trinkets.
     ///
     /// Quivers are excluded. The reference has that line commented out and the
