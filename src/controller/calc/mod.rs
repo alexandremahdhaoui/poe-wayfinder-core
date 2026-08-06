@@ -5,4 +5,5 @@
 //! searching on the printed number finds almost nothing.
 
 pub mod base;
+pub mod preview;
 pub mod quality;
