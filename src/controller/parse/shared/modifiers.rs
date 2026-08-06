@@ -22,6 +22,7 @@ use crate::controller::mod_desc::{
 use crate::controller::parse::{ParseOutcome, ParserState};
 use crate::controller::stat_match::placeholder::{closes_reminder, opens_reminder, StatString};
 use crate::controller::stat_match::resolve::try_parse_translation;
+use crate::types::category::ItemCategory;
 use crate::types::client_strings as cs;
 use crate::types::item::UnknownModifier;
 use crate::types::modifier::{ModifierInfo, ModifierType};
@@ -241,6 +242,137 @@ fn has_type_suffix(line: &str) -> bool {
     .iter()
     .filter_map(|k| k.line_suffix())
     .any(|s| line.ends_with(s))
+}
+
+/// Whether a section carries a tag that makes the whole of it one modifier.
+///
+/// A PoE2 enchant, rune or granted skill prints its marker once and the lines
+/// under it belong together. Splitting them makes each line its own modifier
+/// and the item then claims four runes where it has one.
+fn whole_section_kind(section: &[String]) -> Option<ModifierType> {
+    for line in section {
+        // Checked before the suffixes because a granted skill marks itself at
+        // the front of the line rather than the end.
+        if line.starts_with(cs::GRANTS_SKILL) {
+            return Some(ModifierType::Skill);
+        }
+
+        // The reference's order. Added rune is checked before rune because its
+        // suffix ends with the rune suffix, so the looser test would claim it.
+        for kind in [
+            ModifierType::Enchant,
+            ModifierType::Scourge,
+            ModifierType::AddedAugment,
+            ModifierType::Augment,
+        ] {
+            if kind.line_suffix().is_some_and(|s| line.ends_with(s)) {
+                return Some(kind);
+            }
+        }
+    }
+
+    None
+}
+
+/// Read a PoE2 modifier section.
+///
+/// Ported from `parseModifiersPoe2`.
+///
+/// # How PoE2 differs
+///
+/// PoE1 prints one modifier per section and marks each with a metadata line
+/// when advanced descriptions are on. PoE2 prints every explicit in one
+/// section with no markers at all, so each line there is its own modifier.
+///
+/// Treating that section as one modifier makes a rare with six explicits look
+/// like a single six line modifier, and the tier and name of every one of them
+/// is then attributed to the first.
+///
+/// A section that does carry a tag is the exception and stays whole.
+pub fn read_modifier_section_poe2(
+    section: &[String],
+    category: Option<ItemCategory>,
+    data: &dyn StatLookup,
+) -> ModifierSection {
+    if let Some(kind) = whole_section_kind(section) {
+        let (_, lines) = parse_mod_type(section);
+
+        let info = ModifierInfo {
+            kind: Some(kind),
+            ..ModifierInfo::default()
+        };
+
+        let mut out = ModifierSection::default();
+        read_one(&info, &lines, kind, data, &mut out);
+
+        return out;
+    }
+
+    // The section carries metadata, so the shared reader already groups it
+    // correctly and splitting per line would throw the grouping away.
+    if section.iter().any(|line| is_mod_info_line(line)) {
+        return read_modifier_section(section, data);
+    }
+
+    let mut out = ModifierSection::default();
+
+    for line in section {
+        let own = std::slice::from_ref(line);
+        let (mut kind, lines) = parse_mod_type(own);
+
+        // A relic's explicits are sanctum modifiers. They trade under their
+        // own ids, so sending them as explicit finds nothing.
+        if kind == ModifierType::Explicit && category == Some(ItemCategory::Relic) {
+            kind = ModifierType::Sanctum;
+        }
+
+        let info = ModifierInfo {
+            kind: Some(kind),
+            ..ModifierInfo::default()
+        };
+
+        read_one(&info, &lines, kind, data, &mut out);
+    }
+
+    out
+}
+
+/// The PoE2 modifier stage.
+///
+/// Same claiming rule as the shared stage. It differs only in how it splits
+/// the section into modifiers.
+pub fn parse_modifiers_poe2(section: &[String], state: &mut ParserState<'_>) -> ParseOutcome {
+    // Only a real item carries modifiers. A currency stack or a map device
+    // section reaching here would otherwise be read as a modifier block.
+    if state.item.rarity.is_none() {
+        return ParseOutcome::ParserSkipped;
+    }
+
+    let read = read_modifier_section_poe2(section, state.item.category, state.data);
+
+    if read.is_empty() {
+        return ParseOutcome::SectionSkipped;
+    }
+
+    if read.modifiers.is_empty() && !looks_like_modifiers(section) {
+        return ParseOutcome::SectionSkipped;
+    }
+
+    for m in read.modifiers {
+        if m.info.kind == Some(ModifierType::Fractured) {
+            state.item.is_fractured = true;
+        }
+
+        if m.info.kind == Some(ModifierType::Veiled) {
+            state.item.is_veiled = true;
+        }
+
+        state.item.modifiers.push(m);
+    }
+
+    state.item.unknown_modifiers.extend(read.unknown);
+
+    ParseOutcome::SectionParsed
 }
 
 /// The modifier stage.
@@ -598,5 +730,154 @@ mod tests {
         // identify one. The stage falls back to whether anything matched.
         assert!(!looks_like_modifiers(&sec(&["Item Level: 84"])));
         assert!(!looks_like_modifiers(&sec(&["+25 to maximum Life"])));
+    }
+
+    // -----------------------------------------------------------------
+    // PoE2 splitting
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn every_poe2_explicit_line_is_its_own_modifier() {
+        // Treating the section as one modifier makes a rare with two explicits
+        // look like a single two line modifier, and the tier and name of both
+        // are then attributed to the first.
+        let data = table(&["# to maximum Life", "# to Dexterity"]);
+
+        let got = read_modifier_section_poe2(
+            &sec(&["+25 to maximum Life", "+30 to Dexterity"]),
+            None,
+            &data,
+        );
+
+        assert_eq!(got.modifiers.len(), 2);
+        assert_eq!(got.modifiers[0].stats.len(), 1);
+        assert_eq!(got.modifiers[1].stats.len(), 1);
+    }
+
+    #[test]
+    fn a_tagged_poe2_section_stays_one_modifier() {
+        // A rune prints its marker once and the lines under it belong
+        // together. Splitting them claims two runes where the item has one.
+        let data = table(&["# to maximum Life", "# to Dexterity"]);
+
+        let got = read_modifier_section_poe2(
+            &sec(&["+25 to maximum Life (rune)", "+30 to Dexterity"]),
+            None,
+            &data,
+        );
+
+        assert_eq!(got.modifiers.len(), 1);
+        assert_eq!(got.modifiers[0].info.kind, Some(ModifierType::Augment));
+    }
+
+    #[test]
+    fn an_added_rune_is_not_read_as_a_plain_rune() {
+        // Its suffix ends with the rune suffix, so the looser test claims it.
+        let data = table(&["# to maximum Life"]);
+
+        let got =
+            read_modifier_section_poe2(&sec(&["+25 to maximum Life (added rune)"]), None, &data);
+
+        assert_eq!(got.modifiers[0].info.kind, Some(ModifierType::AddedAugment));
+    }
+
+    #[test]
+    fn an_enchant_section_stays_whole() {
+        let data = table(&["# to maximum Life"]);
+
+        let got = read_modifier_section_poe2(&sec(&["+25 to maximum Life (enchant)"]), None, &data);
+
+        assert_eq!(got.modifiers[0].info.kind, Some(ModifierType::Enchant));
+    }
+
+    #[test]
+    fn a_relic_explicit_is_a_sanctum_modifier() {
+        // Sanctum modifiers trade under their own ids, so sending them as
+        // explicit finds nothing.
+        let data = table(&["# to maximum Life"]);
+
+        let got = read_modifier_section_poe2(
+            &sec(&["+25 to maximum Life"]),
+            Some(ItemCategory::Relic),
+            &data,
+        );
+
+        assert_eq!(got.modifiers[0].info.kind, Some(ModifierType::Sanctum));
+    }
+
+    #[test]
+    fn a_relic_implicit_is_left_as_an_implicit() {
+        // Only the explicits become sanctum modifiers.
+        let data = table(&["# to maximum Life"]);
+
+        let got = read_modifier_section_poe2(
+            &sec(&["+25 to maximum Life (implicit)"]),
+            Some(ItemCategory::Relic),
+            &data,
+        );
+
+        assert_eq!(got.modifiers[0].info.kind, Some(ModifierType::Implicit));
+    }
+
+    #[test]
+    fn a_ring_explicit_is_not_turned_into_a_sanctum_modifier() {
+        let data = table(&["# to maximum Life"]);
+
+        let got = read_modifier_section_poe2(
+            &sec(&["+25 to maximum Life"]),
+            Some(ItemCategory::Ring),
+            &data,
+        );
+
+        assert_eq!(got.modifiers[0].info.kind, Some(ModifierType::Explicit));
+    }
+
+    #[test]
+    fn a_poe2_section_with_metadata_keeps_the_shared_grouping() {
+        // The metadata already says where each modifier starts, and splitting
+        // per line would throw that grouping away.
+        let data = table(&["# to maximum Life", "# to Dexterity"]);
+
+        let section = sec(&[
+            "{ Prefix Modifier \"Rotund\" (Tier: 3) }",
+            "+25 to maximum Life",
+            "+30 to Dexterity",
+        ]);
+
+        let got = read_modifier_section_poe2(&section, None, &data);
+
+        assert_eq!(got.modifiers.len(), 1);
+        assert_eq!(got.modifiers[0].stats.len(), 2);
+    }
+
+    #[test]
+    fn an_unmatched_poe2_line_is_reported_rather_than_dropped() {
+        let data = table(&["# to maximum Life"]);
+
+        let got =
+            read_modifier_section_poe2(&sec(&["+25 to maximum Life", "Mystery line"]), None, &data);
+
+        assert_eq!(got.modifiers.len(), 1);
+        assert_eq!(got.unknown.len(), 1);
+        assert_eq!(got.unknown[0].text, "Mystery line");
+    }
+
+    #[test]
+    fn an_empty_poe2_section_produces_nothing() {
+        assert!(read_modifier_section_poe2(&[], None, &table(&[])).is_empty());
+    }
+
+    #[test]
+    fn a_granted_skill_section_stays_whole() {
+        let data = table(&["# to maximum Life"]);
+
+        let got = read_modifier_section_poe2(
+            &sec(&["Grants Skill: Level 20 Grace", "+25 to maximum Life"]),
+            None,
+            &data,
+        );
+
+        assert_eq!(got.modifiers.len(), 1);
+        assert_eq!(got.modifiers[0].info.kind, Some(ModifierType::Skill));
     }
 }

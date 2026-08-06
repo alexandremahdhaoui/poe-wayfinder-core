@@ -112,6 +112,17 @@ fn modifier_stages() -> Vec<Stage> {
         .collect()
 }
 
+/// The PoE2 modifier stages.
+///
+/// PoE2 prints every explicit in one unmarked section, so each line there is
+/// its own modifier. The shared reader would call the whole section one
+/// modifier and attribute six explicits to the first of them.
+fn modifier_stages_poe2() -> Vec<Stage> {
+    (0..5)
+        .map(|_| Stage::Section(modifiers::parse_modifiers_poe2))
+        .collect()
+}
+
 /// The PoE1 pipeline.
 fn poe1() -> Vec<Stage> {
     let mut out = preamble();
@@ -150,7 +161,7 @@ fn poe2() -> Vec<Stage> {
     ]);
 
     out.extend(special_base_stages());
-    out.extend(modifier_stages());
+    out.extend(modifier_stages_poe2());
 
     // These read what the modifier stages produced, so they run last.
     out.extend(derived_stages());
