@@ -3,7 +3,7 @@
 //! Ported from `tryParseTranslation` and `parseRoll` in
 //! `renderer/src/parser/stat-translations.ts`.
 
-use crate::adapter::data_adapter::StatLookup;
+use crate::adapter::data_adapter::{StatLookup, TradeStatLookup};
 use crate::controller::stat_match::placeholder::{candidates, Candidate, NumMatch, StatString};
 use crate::types::stat::{ParsedStat, StatHit, StatRoll};
 use crate::util::number::roll_or_minmax_avg;
@@ -27,6 +27,37 @@ pub fn try_parse_translation(stat: &StatString, data: &dyn StatLookup) -> Option
     }
 
     None
+}
+
+/// Match a stat line against the trade site's own list when our data misses.
+///
+/// Ported from `trySecondaryParseTranslation`.
+///
+/// # Why there is a second attempt at all
+///
+/// Our stat table is built from the game's own wordings. The trade site keeps
+/// its own list and adds new stats there first, so a league's new modifier is
+/// searchable days before our table knows the wording.
+///
+/// The fallback takes the line as written and asks the trade list directly. It
+/// gives no roll, because a stat matched by its whole text has no placeholder
+/// to read a number out of. A filter on its presence is still worth more than
+/// dropping the modifier as unknown.
+pub fn try_secondary_parse_translation(
+    text: &str,
+    data: &dyn TradeStatLookup,
+) -> Option<ParsedStat> {
+    if !data.trade_stat_exists(text) {
+        return None;
+    }
+
+    Some(ParsedStat {
+        // The line itself is the reference. There is no canonical form to map
+        // to, which is the whole reason this path exists.
+        reference: text.to_string(),
+        matched: text.to_string(),
+        roll: None,
+    })
 }
 
 /// Read the roll a candidate placeheld.
@@ -483,5 +514,79 @@ mod tests {
 
         assert_eq!(got.reference, "#% increased Attack Speed");
         assert_eq!(got.matched, "#% reduced Attack Speed");
+    }
+
+    // -----------------------------------------------------------------
+    // The trade list fallback
+    // -----------------------------------------------------------------
+
+    struct FakeTradeStats {
+        known: Vec<&'static str>,
+    }
+
+    impl TradeStatLookup for FakeTradeStats {
+        fn trade_stat_exists(&self, text: &str) -> bool {
+            self.known.contains(&text)
+        }
+    }
+
+    #[test]
+    fn a_stat_the_trade_site_knows_is_matched_by_its_whole_text() {
+        // A league's new modifier is searchable days before our table knows
+        // its wording.
+        let data = FakeTradeStats {
+            known: vec!["+15% to Brand New Resistance"],
+        };
+
+        let got = try_secondary_parse_translation("+15% to Brand New Resistance", &data)
+            .expect("a known stat matches");
+
+        assert_eq!(got.reference, "+15% to Brand New Resistance");
+        assert_eq!(got.matched, "+15% to Brand New Resistance");
+    }
+
+    #[test]
+    fn the_fallback_gives_no_roll() {
+        // A stat matched by its whole text has no placeholder to read a number
+        // out of, and inventing one would send a filter for a value the item
+        // may not have.
+        let data = FakeTradeStats {
+            known: vec!["+15% to Brand New Resistance"],
+        };
+
+        let got = try_secondary_parse_translation("+15% to Brand New Resistance", &data)
+            .expect("a known stat matches");
+
+        assert_eq!(got.roll, None);
+    }
+
+    #[test]
+    fn a_stat_neither_list_knows_is_left_unmatched() {
+        let data = FakeTradeStats { known: vec![] };
+
+        assert_eq!(try_secondary_parse_translation("Mystery line", &data), None);
+    }
+
+    #[test]
+    fn the_match_is_exact() {
+        // A near match is a different stat with a different trade id, and the
+        // filter would search for something the item does not have.
+        let data = FakeTradeStats {
+            known: vec!["+15% to Brand New Resistance"],
+        };
+
+        assert_eq!(
+            try_secondary_parse_translation("+16% to Brand New Resistance", &data),
+            None
+        );
+    }
+
+    #[test]
+    fn an_empty_line_matches_nothing() {
+        let data = FakeTradeStats {
+            known: vec!["+15% to Brand New Resistance"],
+        };
+
+        assert_eq!(try_secondary_parse_translation("", &data), None);
     }
 }

@@ -353,6 +353,30 @@ pub struct ParsedItem {
 }
 
 impl ParsedItem {
+    /// An item that was never on the clipboard.
+    ///
+    /// Ported from `createVirtualItem`. Used by the rune preview, which builds
+    /// the item as it would be after the rune and runs it through the same
+    /// filter code the real one goes through.
+    ///
+    /// The raw text says so outright. A virtual item that looked real would be
+    /// indistinguishable in a bug report, and its text does not round trip
+    /// through the parser.
+    pub fn virtual_item(info: BaseInfo) -> Self {
+        Self {
+            info,
+            raw_text: "VIRTUAL_ITEM".to_string(),
+            ..Self::default()
+        }
+    }
+
+    /// Whether this item never came from the clipboard.
+    pub fn is_virtual(&self) -> bool {
+        self.raw_text == "VIRTUAL_ITEM"
+    }
+}
+
+impl ParsedItem {
     /// Whether the item can still take crafted modifiers.
     ///
     /// Ported from `itemIsModifiable`.
@@ -510,5 +534,52 @@ mod tests {
 
         assert!(item.has_influence(Influence::Shaper));
         assert!(!item.has_influence(Influence::Elder));
+    }
+
+    // -----------------------------------------------------------------
+    // Virtual items
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn a_virtual_item_carries_the_base_it_was_built_from() {
+        let base = BaseInfo {
+            name: "Spine Bow".into(),
+            reference_name: "Spine Bow".into(),
+            ..BaseInfo::default()
+        };
+
+        let got = ParsedItem::virtual_item(base.clone());
+
+        assert_eq!(got.info, base);
+    }
+
+    #[test]
+    fn a_virtual_item_says_it_is_virtual() {
+        // One that looked real would be indistinguishable in a bug report, and
+        // its text does not round trip through the parser.
+        assert!(ParsedItem::virtual_item(BaseInfo::default()).is_virtual());
+    }
+
+    #[test]
+    fn a_parsed_item_is_not_virtual() {
+        let item = ParsedItem {
+            raw_text: "Item Class: Bows".into(),
+            ..ParsedItem::default()
+        };
+
+        assert!(!item.is_virtual());
+    }
+
+    #[test]
+    fn a_virtual_item_starts_with_nothing_on_it() {
+        // The preview adds the rune's modifier itself, and inherited state
+        // would show a modifier the rune did not add.
+        let got = ParsedItem::virtual_item(BaseInfo::default());
+
+        assert!(got.modifiers.is_empty());
+        assert!(got.unknown_modifiers.is_empty());
+        assert!(got.influences.is_empty());
+        assert!(!got.is_corrupted);
+        assert!(!got.is_unidentified);
     }
 }

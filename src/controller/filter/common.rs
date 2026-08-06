@@ -46,6 +46,59 @@ pub fn enable_all(filters: &mut [StatFilter]) {
     }
 }
 
+/// What an item needs done to its filters once they are all built.
+///
+/// Ported from `finalFilterTweaks`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FinalTweaks {
+    /// Apply the cluster jewel rules.
+    ///
+    /// A cluster jewel is bought for its passive count and its notables, and
+    /// every other roll on it is noise a buyer does not filter on.
+    pub cluster_jewel_rules: bool,
+    /// Apply the flask rules.
+    pub flask_rules: bool,
+    /// Hide every rune filter.
+    ///
+    /// A unique's runes are part of the item as listed. Filtering on them
+    /// searches for a unique someone else socketed the same way, which is a
+    /// different and much rarer item than the one the user is pricing.
+    pub hide_augments: bool,
+    /// Offer the empty modifier filter.
+    pub show_empty_modifier: bool,
+}
+
+/// Uniques whose runes are worth filtering on.
+///
+/// Both are bought for what is socketed in them and nothing else, so hiding
+/// their rune filters would hide the only thing that sets one apart.
+const AUGMENT_UNIQUES: &[&str] = &["Morior Invictus", "Darkness Enthroned"];
+
+/// Work out the final tweaks for an item.
+///
+/// Ported from `finalFilterTweaks`. The cluster jewel and flask rules are
+/// exclusive: an item is one or the other and never both.
+pub fn final_filter_tweaks(
+    category: Option<ItemCategory>,
+    rarity: Option<crate::types::item::ItemRarity>,
+    reference_name: &str,
+    has_empty_slot: bool,
+) -> FinalTweaks {
+    use crate::types::item::ItemRarity;
+
+    let unique = rarity == Some(ItemRarity::Unique);
+
+    FinalTweaks {
+        // A unique cluster jewel has fixed passives, so the rules that pick
+        // which rolls matter do not apply to it.
+        cluster_jewel_rules: category == Some(ItemCategory::ClusterJewel) && !unique,
+        flask_rules: category == Some(ItemCategory::Flask)
+            && category != Some(ItemCategory::ClusterJewel),
+        hide_augments: unique && !AUGMENT_UNIQUES.contains(&reference_name),
+        show_empty_modifier: has_empty_slot,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,5 +185,96 @@ mod tests {
         enable_all(&mut filters);
 
         assert!(filters.is_empty());
+    }
+
+    // -----------------------------------------------------------------
+    // Final tweaks
+    // -----------------------------------------------------------------
+
+    use crate::types::item::ItemRarity;
+
+    fn tweaks(category: ItemCategory, rarity: ItemRarity, name: &str) -> FinalTweaks {
+        final_filter_tweaks(Some(category), Some(rarity), name, false)
+    }
+
+    #[test]
+    fn a_rare_cluster_jewel_gets_the_cluster_rules() {
+        // It is bought for its passive count and its notables, and every other
+        // roll on it is noise a buyer does not filter on.
+        assert!(tweaks(ItemCategory::ClusterJewel, ItemRarity::Rare, "x").cluster_jewel_rules);
+    }
+
+    #[test]
+    fn a_unique_cluster_jewel_does_not() {
+        // Its passives are fixed, so the rules that pick which rolls matter do
+        // not apply.
+        assert!(!tweaks(ItemCategory::ClusterJewel, ItemRarity::Unique, "x").cluster_jewel_rules);
+    }
+
+    #[test]
+    fn a_flask_gets_the_flask_rules() {
+        assert!(tweaks(ItemCategory::Flask, ItemRarity::Magic, "x").flask_rules);
+    }
+
+    #[test]
+    fn the_two_rule_sets_are_never_both_applied() {
+        // An item is one or the other and never both.
+        for category in [
+            ItemCategory::ClusterJewel,
+            ItemCategory::Flask,
+            ItemCategory::Ring,
+        ] {
+            for rarity in [ItemRarity::Normal, ItemRarity::Rare, ItemRarity::Unique] {
+                let got = tweaks(category, rarity, "x");
+
+                assert!(
+                    !(got.cluster_jewel_rules && got.flask_rules),
+                    "{category:?} {rarity:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_unique_hides_its_rune_filters() {
+        // Filtering on them searches for a unique someone else socketed the
+        // same way, which is a rarer item than the one being priced.
+        assert!(tweaks(ItemCategory::BodyArmour, ItemRarity::Unique, "Kaom's Heart").hide_augments);
+    }
+
+    #[test]
+    fn the_two_uniques_bought_for_their_runes_keep_them() {
+        // Hiding their rune filters would hide the only thing that sets one
+        // apart.
+        for name in ["Morior Invictus", "Darkness Enthroned"] {
+            assert!(
+                !tweaks(ItemCategory::BodyArmour, ItemRarity::Unique, name).hide_augments,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_rare_keeps_its_rune_filters() {
+        assert!(!tweaks(ItemCategory::BodyArmour, ItemRarity::Rare, "x").hide_augments);
+    }
+
+    #[test]
+    fn an_item_with_an_empty_slot_offers_the_empty_modifier_filter() {
+        let got = final_filter_tweaks(Some(ItemCategory::Ring), Some(ItemRarity::Rare), "x", true);
+
+        assert!(got.show_empty_modifier);
+    }
+
+    #[test]
+    fn a_full_item_does_not_offer_it() {
+        assert!(!tweaks(ItemCategory::Ring, ItemRarity::Rare, "x").show_empty_modifier);
+    }
+
+    #[test]
+    fn an_item_with_no_category_gets_no_rule_set() {
+        let got = final_filter_tweaks(None, Some(ItemRarity::Rare), "x", false);
+
+        assert_eq!(got, FinalTweaks::default());
     }
 }

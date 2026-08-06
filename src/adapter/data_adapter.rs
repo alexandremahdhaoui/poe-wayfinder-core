@@ -20,6 +20,16 @@ pub trait StatLookup {
     fn stat_by_matcher(&self, template: &str) -> Option<StatHit<'_>>;
 }
 
+/// The trade site's own stat list.
+///
+/// Separate from `StatLookup` because it answers a different question. That
+/// one asks what a line means. This one asks only whether the site will accept
+/// a filter on it, which is what makes it useful when our own table is behind.
+pub trait TradeStatLookup {
+    /// Whether the trade site indexes a stat with this exact text.
+    fn trade_stat_exists(&self, text: &str) -> bool;
+}
+
 /// Which table an item lookup should search.
 ///
 /// The same name can exist in several tables. `The Doctor` is a divination

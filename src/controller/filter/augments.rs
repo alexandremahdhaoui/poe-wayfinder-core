@@ -66,6 +66,51 @@ pub fn augment_name<'a>(augments: &'a [Augment], reference: &'a str) -> &'a str 
         .map_or(reference, |a| a.name.as_str())
 }
 
+/// Build the filters an item would have with this rune in every empty socket.
+///
+/// Ported from `createNewStatFilter`.
+///
+/// # Why the value multiplies by the socket count
+///
+/// A user with three empty sockets is pricing the item they will make, and
+/// they will put the same rune in all three. Previewing one rune prices an
+/// item they are not going to own.
+///
+/// Returns nothing when the rune cannot go in this base, so the caller shows
+/// the item as it is rather than a preview of something impossible.
+pub fn preview_filters(
+    augment: &Augment,
+    category: ItemCategory,
+    empty_sockets: u32,
+    existing: &[StatFilter],
+) -> Option<Vec<StatFilter>> {
+    let effect = effect_for_category(augment, category)?;
+
+    // No empty socket means nothing to preview. The rune has nowhere to go.
+    if empty_sockets == 0 {
+        return None;
+    }
+
+    let granted = StatFilter::range(
+        &effect.reference,
+        crate::types::query::Range::at_least(effect.value * f64::from(empty_sockets)),
+    );
+
+    let mut out: Vec<StatFilter> = existing.to_vec();
+
+    // A rune that grants a stat the item already has raises that stat rather
+    // than adding a second filter for it. Two filters on one stat ask the site
+    // for the total twice and find nothing.
+    if let Some(existing) = out.iter_mut().find(|f| f.id == granted.id) {
+        existing.range.min =
+            Some(existing.range.min.unwrap_or(0.0) + effect.value * f64::from(empty_sockets));
+    } else {
+        out.push(granted);
+    }
+
+    Some(out)
+}
+
 /// A reversible edit to a filter set.
 ///
 /// The original filters are kept so unpicking a rune restores them exactly,
@@ -330,6 +375,96 @@ mod tests {
         let mut filters = original.clone();
 
         edit.apply(&mut filters, vec![filter("x", false)]);
+        edit.remove(&mut filters);
+
+        assert_eq!(filters, original);
+    }
+
+    // -----------------------------------------------------------------
+    // Building the preview
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn a_rune_adds_its_stat_to_the_filters() {
+        let got = preview_filters(&iron_rune(), ItemCategory::Bow, 1, &[])
+            .expect("the rune fits the base");
+
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].id, "#% increased Physical Damage");
+        assert_eq!(got[0].range.min, Some(20.0));
+    }
+
+    #[test]
+    fn the_value_multiplies_by_the_empty_socket_count() {
+        // A user with three empty sockets will put the same rune in all three,
+        // and previewing one prices an item they are not going to own.
+        let got = preview_filters(&iron_rune(), ItemCategory::Bow, 3, &[])
+            .expect("the rune fits the base");
+
+        assert_eq!(got[0].range.min, Some(60.0));
+    }
+
+    #[test]
+    fn a_rune_raises_a_stat_the_item_already_has() {
+        // Two filters on one stat ask the site for the total twice and find
+        // nothing.
+        let existing = vec![StatFilter::range(
+            "#% increased Physical Damage",
+            Range::at_least(50.0),
+        )];
+
+        let got = preview_filters(&iron_rune(), ItemCategory::Bow, 1, &existing)
+            .expect("the rune fits the base");
+
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].range.min, Some(70.0));
+    }
+
+    #[test]
+    fn the_other_filters_are_carried_through() {
+        let existing = vec![StatFilter::range(
+            "+# to maximum Life",
+            Range::at_least(50.0),
+        )];
+
+        let got = preview_filters(&iron_rune(), ItemCategory::Bow, 1, &existing)
+            .expect("the rune fits the base");
+
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].id, "+# to maximum Life");
+    }
+
+    #[test]
+    fn a_rune_that_cannot_go_in_this_base_previews_nothing() {
+        // The caller shows the item as it is rather than a preview of
+        // something impossible.
+        assert_eq!(
+            preview_filters(&iron_rune(), ItemCategory::Ring, 1, &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn an_item_with_no_empty_socket_previews_nothing() {
+        // The rune has nowhere to go.
+        assert_eq!(
+            preview_filters(&iron_rune(), ItemCategory::Bow, 0, &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn the_preview_round_trips_through_an_edit() {
+        // The whole point of building it. An edit that does not reverse
+        // cleanly loses the user's work.
+        let original = vec![filter("a", false)];
+        let mut filters = original.clone();
+
+        let replacement = preview_filters(&iron_rune(), ItemCategory::Bow, 1, &filters)
+            .expect("the rune fits the base");
+
+        let mut edit = FilterEdit::default();
+        edit.apply(&mut filters, replacement);
         edit.remove(&mut filters);
 
         assert_eq!(filters, original);

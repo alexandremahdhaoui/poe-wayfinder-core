@@ -11,6 +11,7 @@ pub mod brackets;
 pub mod common;
 pub mod item_filters;
 pub mod item_property;
+pub mod mageblood;
 pub mod presets;
 pub mod pseudo;
 pub mod roll_math;
@@ -18,6 +19,7 @@ pub mod rules;
 pub mod slots;
 pub mod stat_filters;
 pub mod unique;
+pub mod wording;
 
 pub use item_filters::{build_query, FilterOptions};
 pub use pseudo::{pseudo_totals, PseudoTotal};

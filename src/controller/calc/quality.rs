@@ -125,6 +125,40 @@ pub fn prop_at_20_quality(
     }
 }
 
+/// Restate a printed property with no quality involved.
+///
+/// Ported from `calcPropBounds`.
+///
+/// # Why this is not the quality version with zero passed in
+///
+/// Some properties are not scaled by quality at all. Attack speed, revives and
+/// pack size are printed as the game computed them, and running them through
+/// the quality maths would move a number quality never touched.
+///
+/// The bounds still have to be backed out of the printed total, because the
+/// modifiers that produced it are what the filter widens against.
+pub fn prop_bounds(total: f64, contributions: PropContributions) -> Roll {
+    let base = strip_scaling(total, contributions.increased.value, 0.0) - contributions.flat.value;
+
+    Roll {
+        value: apply_scaling(
+            base + contributions.flat.value,
+            contributions.increased.value,
+            0.0,
+        ),
+        min: apply_scaling(
+            base + contributions.flat.min,
+            contributions.increased.min,
+            0.0,
+        ),
+        max: apply_scaling(
+            base + contributions.flat.max,
+            contributions.increased.max,
+            0.0,
+        ),
+    }
+}
+
 /// Where a rolled property sits inside its possible range, 0 to 100.
 ///
 /// Ported from `calcPropPercentile`. Clamped, because a base whose range our
@@ -351,5 +385,87 @@ mod tests {
         let got = prop_percentile(133.0, (100.0, 200.0), PropContributions::default(), 0.0);
 
         assert_eq!(got, got.round());
+    }
+
+    // -----------------------------------------------------------------
+    // Bounds with no quality involved
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn a_property_with_no_modifiers_reports_itself() {
+        let got = prop_bounds(1.5, PropContributions::default());
+
+        assert_eq!(got.value, 1.5);
+        assert_eq!(got.min, 1.5);
+        assert_eq!(got.max, 1.5);
+    }
+
+    #[test]
+    fn quality_never_touches_these_bounds() {
+        // Attack speed is printed as the game computed it, and running it
+        // through the quality maths moves a number quality never touched.
+        let plain = prop_bounds(1.5, PropContributions::default());
+
+        assert_eq!(plain.value, 1.5);
+    }
+
+    #[test]
+    fn an_increase_is_backed_out_of_the_printed_total() {
+        // 150 printed with a 50 percent increase came from a base of 100.
+        let got = prop_bounds(
+            150.0,
+            PropContributions {
+                flat: Roll::zero(),
+                increased: Roll {
+                    value: 50.0,
+                    min: 50.0,
+                    max: 50.0,
+                },
+            },
+        );
+
+        assert_eq!(got.value, 150.0);
+    }
+
+    #[test]
+    fn the_bounds_move_with_the_modifier_range() {
+        // The filter widens against the range the modifiers can roll, not
+        // against the single number printed.
+        let got = prop_bounds(
+            150.0,
+            PropContributions {
+                flat: Roll::zero(),
+                increased: Roll {
+                    value: 50.0,
+                    min: 40.0,
+                    max: 60.0,
+                },
+            },
+        );
+
+        assert!(got.min < got.value, "{got:?}");
+        assert!(got.max > got.value, "{got:?}");
+    }
+
+    #[test]
+    fn a_flat_addition_is_backed_out_too() {
+        let got = prop_bounds(
+            180.0,
+            PropContributions {
+                flat: Roll {
+                    value: 80.0,
+                    min: 80.0,
+                    max: 80.0,
+                },
+                increased: Roll::zero(),
+            },
+        );
+
+        assert_eq!(got.value, 180.0);
+    }
+
+    #[test]
+    fn a_zero_total_stays_zero() {
+        assert_eq!(prop_bounds(0.0, PropContributions::default()).value, 0.0);
     }
 }
