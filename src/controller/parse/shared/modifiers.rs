@@ -60,30 +60,42 @@ impl ModifierSection {
 /// line was present, which means this is not a modifier section and another
 /// stage should get it.
 pub fn read_modifier_section(section: &[String], data: &dyn StatLookup) -> ModifierSection {
-    let (kind, lines) = parse_mod_type(section);
-
-    let groups = group_lines_by_mod(&lines);
+    // Grouped from the raw section, not from the stripped lines. Stripping
+    // first removes the `(desecrated)` and `(crafted)` markers, and each
+    // modifier's type is decided by the marker on its own lines.
+    let groups = group_lines_by_mod(section);
 
     let mut out = ModifierSection::default();
 
     if groups.is_empty() {
+        let (section_kind, lines) = parse_mod_type(section);
+
         // No metadata lines. The whole section is one modifier whose type the
         // line suffixes already gave us.
         let info = ModifierInfo {
-            kind: Some(kind),
+            kind: Some(section_kind),
             ..ModifierInfo::default()
         };
 
-        read_one(&info, &lines, kind, data, &mut out);
+        read_one(&info, &lines, section_kind, data, &mut out);
 
         return out;
     }
 
     for group in groups {
-        let info = parse_mod_info_line(&group.mod_line, kind);
-        let group_kind = info.kind.unwrap_or(kind);
+        // Each modifier is typed from its own stat lines, not from the
+        // section's. A section can mix types: one line ending in
+        // `(desecrated)` types that modifier and no other.
+        //
+        // Reading the section's type here gave a body armour with one
+        // desecrated modifier five more of them, and the query then asked for
+        // six desecrated modifiers that do not exist.
+        let (group_kind, group_lines) = parse_mod_type(&group.stat_lines);
 
-        read_one(&info, &group.stat_lines, group_kind, data, &mut out);
+        let info = parse_mod_info_line(&group.mod_line, group_kind);
+        let kind = info.kind.unwrap_or(group_kind);
+
+        read_one(&info, &group_lines, kind, data, &mut out);
     }
 
     out
@@ -218,9 +230,13 @@ fn split_unscalable_marker(text: &str) -> StatString {
 /// of one line that matched nothing is far more likely to be something another
 /// stage wants.
 pub fn looks_like_modifiers(section: &[String]) -> bool {
-    section
-        .iter()
-        .any(|l| is_mod_info_line(l) || has_type_suffix(l))
+    section.iter().any(|l| {
+        // A granted skill marks itself at the front rather than at the end.
+        // Leaving it out here meant a shield whose granted skill was not in
+        // the stat table lost the line entirely: no modifier, no unknown
+        // modifier, nothing for the panel to warn about.
+        l.starts_with(cs::GRANTS_SKILL) || is_mod_info_line(l) || has_type_suffix(l)
+    })
 }
 
 /// Whether a line ends in a modifier type suffix.
@@ -879,5 +895,34 @@ mod tests {
 
         assert_eq!(got.modifiers.len(), 1);
         assert_eq!(got.modifiers[0].info.kind, Some(ModifierType::Skill));
+    }
+
+    #[test]
+    fn a_granted_skill_the_data_does_not_know_is_still_reported() {
+        // A shield printing "Grants Skill: Raise Shield" against a data file
+        // that spells it "Grants Skill: Level # Raise Shield" lost the line
+        // entirely: no modifier, no unknown modifier, nothing for the panel to
+        // warn about. The user saw a price built from an item the tool had
+        // only half read, and nothing said so.
+        let got =
+            read_modifier_section_poe2(&sec(&["Grants Skill: Raise Shield"]), None, &table(&[]));
+
+        assert!(got.modifiers.is_empty());
+        assert_eq!(got.unknown.len(), 1);
+        assert_eq!(got.unknown[0].kind, ModifierType::Skill);
+    }
+
+    #[test]
+    fn a_granted_skill_line_marks_a_section_as_modifiers() {
+        // The marker is at the front of the line, not the end, so the suffix
+        // test alone never sees it.
+        assert!(looks_like_modifiers(&sec(&["Grants Skill: Raise Shield"])));
+    }
+
+    #[test]
+    fn an_ordinary_line_still_does_not_look_like_modifiers() {
+        // The guard has to stay narrow. Treating any section as modifiers
+        // makes the stage eat the first section it is offered.
+        assert!(!looks_like_modifiers(&sec(&["Requires: Level 54"])));
     }
 }

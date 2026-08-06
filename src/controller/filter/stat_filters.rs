@@ -137,7 +137,16 @@ pub fn build_stat_filters(
                 ),
             );
 
-            filter.disabled = !options.enable_all && !property.enabled;
+            // A unique's defences are the unique's, not the base's. Every copy
+            // rolls the same modifiers, so requiring this one's numbers
+            // excludes every other copy that rolled a point lower.
+            //
+            // The filter still travels, so the trade site shows it greyed out
+            // and the user can switch it on. The parser reads the numbers; the
+            // decision about them is here.
+            let unique = options.facts.is_unique;
+
+            filter.disabled = !options.enable_all && (unique || !property.enabled);
 
             filters.push(filter);
         }

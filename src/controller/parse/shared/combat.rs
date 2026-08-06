@@ -3,15 +3,26 @@
 //! Ported from `parseArmour`, `parseWeapon` and `parseCaster` in
 //! `renderer/src/parser/Parser.ts`.
 //!
-//! Both stages throw their work away on a unique. A unique's numbers come from
-//! the unique itself and not from the base, so a base roll filter built from
-//! them would exclude every copy of the item.
+//! # A unique's numbers are read like anything else
+//!
+//! These stages used to clear the armour and weapon values whenever the item
+//! was unique, reasoning that a base roll filter built from them would exclude
+//! every copy of the item.
+//!
+//! That is a filter decision made in the wrong place. The reference reads the
+//! numbers and asserts it does: `parsers.test.ts` "Unique Armour" expects an
+//! energy shield of 44 on a unique focus. Throwing them away here meant a
+//! unique's defences never reached the panel and could never be shown, and the
+//! decision about whether to filter on them could not be revisited.
+//!
+//! The filter layer makes that decision now, in `item_property.rs`, where the
+//! item's rarity is already known.
 
 use crate::controller::parse::shared::levels::parse_quality_nested;
 use crate::controller::parse::{ParseOutcome, ParserState};
 use crate::types::category::ItemCategory;
 use crate::types::client_strings as cs;
-use crate::types::item::{ArmourStats, ItemRarity, WeaponStats};
+use crate::types::item::{ArmourStats, WeaponStats};
 use crate::util::number::{damage_list_sum, damage_range_avg, leading_float, leading_int};
 
 /// Armour, evasion, energy shield, ward and block.
@@ -28,10 +39,6 @@ pub fn parse_armour(section: &[String], state: &mut ParserState) -> ParseOutcome
     }
 
     parse_quality_nested(section, state);
-
-    if state.item.rarity == Some(ItemRarity::Unique) {
-        state.item.armour = ArmourStats::default();
-    }
 
     ParseOutcome::SectionParsed
 }
@@ -87,10 +94,6 @@ pub fn parse_weapon(section: &[String], state: &mut ParserState) -> ParseOutcome
     }
 
     parse_quality_nested(section, state);
-
-    if state.item.rarity == Some(ItemRarity::Unique) {
-        state.item.weapon = WeaponStats::default();
-    }
 
     ParseOutcome::SectionParsed
 }
@@ -241,17 +244,17 @@ mod tests {
     }
 
     #[test]
-    fn a_unique_keeps_no_armour_numbers() {
-        // A unique's defences come from the unique and not from the base, so a
-        // base roll filter built from them would exclude every other copy.
+    fn a_unique_keeps_its_armour_numbers() {
+        // The reference reads them and asserts it does. Clearing them here
+        // meant a unique's defences never reached the panel, and it put a
+        // filter decision in the parser. The filter layer decides.
         let mut s = ParserState::default();
-        s.item.rarity = Some(ItemRarity::Unique);
+        s.item.rarity = Some(crate::types::item::ItemRarity::Unique);
 
         let out = parse_armour(&sec(&["Armour: 512", "Quality: +20%"]), &mut s);
 
         assert_eq!(out, ParseOutcome::SectionParsed);
-        assert!(s.item.armour.is_empty());
-        // Quality survives. It is printed on the item and is not derived.
+        assert_eq!(s.item.armour.ar, Some(512.0));
         assert_eq!(s.item.quality, Some(20));
     }
 
@@ -341,13 +344,13 @@ mod tests {
     }
 
     #[test]
-    fn a_unique_keeps_no_weapon_numbers() {
+    fn a_unique_keeps_its_weapon_numbers() {
         let mut s = ParserState::default();
-        s.item.rarity = Some(ItemRarity::Unique);
+        s.item.rarity = Some(crate::types::item::ItemRarity::Unique);
 
         parse_weapon(&sec(&["Physical Damage: 45-90", "Quality: +20%"]), &mut s);
 
-        assert!(s.item.weapon.is_empty());
+        assert_eq!(s.item.weapon.physical, Some(67.5));
         assert_eq!(s.item.quality, Some(20));
     }
 

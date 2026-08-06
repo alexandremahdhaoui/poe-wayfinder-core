@@ -417,7 +417,7 @@ mod tests {
     }
 
     #[test]
-    fn a_unique_reports_no_base_numbers() {
+    fn a_unique_reports_its_base_numbers() {
         let item = run(
             &text(&[
                 "Item Class: Body Armours",
@@ -438,7 +438,9 @@ mod tests {
         .unwrap();
 
         assert_eq!(item.rarity, Some(ItemRarity::Unique));
-        assert!(item.armour.is_empty());
+        // Read, not thrown away. The reference reads them and asserts it
+        // does, and whether to filter on them is the filter layer's call.
+        assert_eq!(item.armour.ar, Some(500.0));
         assert!(item.is_corrupted);
     }
 }
