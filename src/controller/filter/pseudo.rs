@@ -326,6 +326,79 @@ pub fn pseudo_totals(totals: &[StatTotal]) -> Vec<PseudoTotal> {
     out
 }
 
+/// Whether a stat feeds a pseudo total or a property filter.
+///
+/// Ported from `refEffectsPseudos`.
+///
+/// # Why this question is asked
+///
+/// A rune preview replaces the item's filters with the ones it would have.
+/// Rebuilding every filter is wrong: only the ones the rune can move need to
+/// change, and rebuilding the rest resets whatever the user had switched on.
+///
+/// A stat that feeds nothing is left exactly as it was.
+pub fn affects_pseudo(reference: &str) -> bool {
+    if PSEUDO_RULES
+        .iter()
+        .flat_map(|rule| rule.stats)
+        .any(|c| signs_match(c.reference, reference))
+    {
+        return true;
+    }
+
+    // A defence or damage stat feeds a property filter rather than a pseudo
+    // total, and a rune moves those just as much.
+    if ARMOUR_STATS.contains(&reference) || WEAPON_STATS.contains(&reference) {
+        return true;
+    }
+
+    // Chaos damage has no pseudo rule of its own but a rune still adds it, so
+    // the preview has to rebuild its filter.
+    reference == "Adds # to # Chaos Damage"
+}
+
+/// Whether two references are the same stat ignoring the sign marker.
+///
+/// The rules spell a stat `+# to maximum Life` and an item can print it as
+/// `# to maximum Life` or `-# to maximum Life`. Comparing the strings outright
+/// misses two forms of the same stat, and the preview then leaves a filter the
+/// rune does move.
+fn signs_match(rule: &str, reference: &str) -> bool {
+    rule == reference || strip_sign(rule) == strip_sign(reference)
+}
+
+fn strip_sign(reference: &str) -> String {
+    reference.replace("+#", "#").replace("-#", "#")
+}
+
+/// The armour stats a property filter already covers.
+///
+/// Sending both a defence filter and the modifier that produced it filters the
+/// same thing twice.
+pub const ARMOUR_STATS: &[&str] = &[
+    "#% increased Armour",
+    "#% increased Evasion Rating",
+    "#% increased Energy Shield",
+    "#% increased Armour and Evasion",
+    "#% increased Armour and Energy Shield",
+    "#% increased Evasion and Energy Shield",
+    "#% increased Armour, Evasion and Energy Shield",
+    "+# to Armour",
+    "+# to Evasion Rating",
+    "+# to maximum Energy Shield",
+    "#% increased Block chance",
+];
+
+/// The weapon stats a property filter already covers.
+pub const WEAPON_STATS: &[&str] = &[
+    "#% increased Physical Damage",
+    "Adds # to # Physical Damage",
+    "#% increased Attack Speed",
+    "Adds # to # Fire Damage",
+    "Adds # to # Cold Damage",
+    "Adds # to # Lightning Damage",
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -667,6 +740,79 @@ mod tests {
             if let Some(index) = rule.stats.iter().position(|c| c.required) {
                 assert_eq!(index, 0, "{}", rule.pseudo);
             }
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Which stats a rune preview has to rebuild
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn a_stat_that_feeds_a_pseudo_total_is_rebuilt() {
+        // Only the filters a rune can move need to change. Rebuilding the rest
+        // resets whatever the user had switched on.
+        assert!(affects_pseudo("+# to maximum Life"));
+        assert!(affects_pseudo("+#% to Fire Resistance"));
+    }
+
+    #[test]
+    fn the_sign_marker_does_not_hide_a_match() {
+        // The rules spell it "+# to maximum Life" and an item can print it
+        // without the plus. Comparing outright leaves a filter the rune moves.
+        assert!(affects_pseudo("# to maximum Life"));
+        assert!(affects_pseudo("-# to maximum Life"));
+    }
+
+    #[test]
+    fn a_defence_stat_is_rebuilt() {
+        // It feeds a property filter rather than a pseudo total, and a rune
+        // moves those just as much.
+        assert!(affects_pseudo("#% increased Armour"));
+        assert!(affects_pseudo("+# to maximum Energy Shield"));
+    }
+
+    #[test]
+    fn a_weapon_damage_stat_is_rebuilt() {
+        assert!(affects_pseudo("#% increased Physical Damage"));
+        assert!(affects_pseudo("Adds # to # Fire Damage"));
+    }
+
+    #[test]
+    fn chaos_damage_is_rebuilt_despite_having_no_pseudo_rule() {
+        // A rune still adds it, so the preview has to rebuild its filter.
+        assert!(affects_pseudo("Adds # to # Chaos Damage"));
+    }
+
+    #[test]
+    fn a_stat_that_feeds_nothing_is_left_alone() {
+        assert!(!affects_pseudo("Cannot be Frozen"));
+        assert!(!affects_pseudo("#% increased Rarity of Items found"));
+    }
+
+    #[test]
+    fn an_empty_reference_feeds_nothing() {
+        assert!(!affects_pseudo(""));
+    }
+
+    #[test]
+    fn every_property_stat_reference_is_distinct() {
+        // A duplicate would be dead weight and hide a typo in its twin.
+        for table in [ARMOUR_STATS, WEAPON_STATS] {
+            let mut seen = table.to_vec();
+            seen.sort_unstable();
+            let count = seen.len();
+            seen.dedup();
+
+            assert_eq!(seen.len(), count, "{table:?}");
+        }
+    }
+
+    #[test]
+    fn every_property_stat_carries_a_placeholder() {
+        // A reference with no hash matches no roll and silently filters
+        // nothing, which is the failure this crate keeps hitting.
+        for reference in ARMOUR_STATS.iter().chain(WEAPON_STATS) {
+            assert!(reference.contains('#'), "{reference}");
         }
     }
 }
