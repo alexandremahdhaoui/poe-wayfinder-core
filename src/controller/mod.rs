@@ -3,9 +3,12 @@
 pub mod aggregate;
 pub mod bulk;
 pub mod calc;
+pub mod chat;
 pub mod filter;
+pub mod game_config;
 pub mod listing;
 pub mod mod_desc;
+pub mod overlay;
 pub mod parse;
 pub mod price_check;
 pub mod stat_match;
