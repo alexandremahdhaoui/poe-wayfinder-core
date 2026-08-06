@@ -9,6 +9,7 @@ pub mod augments;
 pub mod bounds;
 pub mod brackets;
 pub mod common;
+pub mod influence;
 pub mod item_filters;
 pub mod item_property;
 pub mod mageblood;

@@ -109,6 +109,8 @@ pub fn build_stat_group_for(
 
             filters.push(filter);
         }
+
+        filters.extend(influence_filters(&item.influences, data, options));
     }
 
     let totals = sum_stats_by_type(modifiers);
@@ -167,6 +169,49 @@ pub fn build_stat_group_for(
         filters,
         ..StatGroup::all(Vec::new())
     })
+}
+
+/// One filter per influence the item carries.
+///
+/// The trade site indexes influence under `pseudo` rather than as a modifier,
+/// so it never reaches the query through the modifier path. PoE1 only. A PoE2
+/// item carries no influence and this returns nothing for it.
+///
+/// Off by default, like every other filter the user did not ask for. An
+/// influenced base is still an ordinary base and the buyer decides whether the
+/// influence is the point.
+fn influence_filters(
+    influences: &[crate::types::item::Influence],
+    data: &dyn StatLookup,
+    options: StatFilterOptions,
+) -> Vec<StatFilter> {
+    let mut out = Vec::new();
+
+    for influence in crate::controller::filter::influence::filterable(influences) {
+        let reference = crate::controller::filter::influence::stat_reference(*influence);
+
+        let Some(hit) = data.stat_by_matcher(reference) else {
+            // A PoE2 data file has no such stat. Nothing to send and nothing
+            // wrong.
+            continue;
+        };
+
+        let Some(id) = hit
+            .stat
+            .trade
+            .ids_for(ModifierType::Pseudo)
+            .and_then(|ids| ids.first())
+        else {
+            continue;
+        };
+
+        let mut filter = StatFilter::range(id, Range::default());
+        filter.disabled = !options.enable_all;
+
+        out.push(filter);
+    }
+
+    out
 }
 
 /// The literal form the game printed for a stat.
@@ -362,6 +407,115 @@ mod tests {
             max: value,
             ..StatRoll::default()
         })
+    }
+
+    fn influence_table() -> FakeStats {
+        FakeStats {
+            stats: vec![
+                stat_with(
+                    "Has Shaper Influence",
+                    StatBetter::PositiveRoll,
+                    trade_with("pseudo", "pseudo.pseudo_has_shaper_influence"),
+                ),
+                stat_with(
+                    "Has Elder Influence",
+                    StatBetter::PositiveRoll,
+                    trade_with("pseudo", "pseudo.pseudo_has_elder_influence"),
+                ),
+            ],
+        }
+    }
+
+    fn influenced(
+        influences: Vec<crate::types::item::Influence>,
+    ) -> crate::types::item::ParsedItem {
+        crate::types::item::ParsedItem {
+            influences,
+            ..crate::types::item::ParsedItem::default()
+        }
+    }
+
+    #[test]
+    fn an_influenced_base_gets_a_filter_on_its_influence() {
+        // The trade site files influence under pseudo, so it never reaches the
+        // query through the modifier path. PoE1 had no influence filter at all.
+        let item = influenced(vec![crate::types::item::Influence::Shaper]);
+
+        let group = build_stat_group_for(
+            &[],
+            Some(&item),
+            &influence_table(),
+            StatFilterOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(group.filters.len(), 1);
+        assert_eq!(group.filters[0].id, "pseudo.pseudo_has_shaper_influence");
+    }
+
+    #[test]
+    fn an_influence_filter_starts_off() {
+        // An influenced base is still an ordinary base. The buyer decides
+        // whether the influence is the point.
+        let item = influenced(vec![crate::types::item::Influence::Shaper]);
+
+        let group = build_stat_group_for(
+            &[],
+            Some(&item),
+            &influence_table(),
+            StatFilterOptions::default(),
+        )
+        .unwrap();
+
+        assert!(group.filters[0].disabled);
+    }
+
+    #[test]
+    fn a_double_influenced_base_gets_both_filters() {
+        let item = influenced(vec![
+            crate::types::item::Influence::Shaper,
+            crate::types::item::Influence::Elder,
+        ]);
+
+        let group = build_stat_group_for(
+            &[],
+            Some(&item),
+            &influence_table(),
+            StatFilterOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(group.filters.len(), 2);
+    }
+
+    #[test]
+    fn an_uninfluenced_base_gets_no_influence_filter() {
+        let item = influenced(vec![]);
+
+        let group = build_stat_group_for(
+            &[],
+            Some(&item),
+            &influence_table(),
+            StatFilterOptions::default(),
+        );
+
+        assert!(group.is_none(), "an empty group matches everything");
+    }
+
+    #[test]
+    fn an_influence_the_data_does_not_know_sends_nothing() {
+        // A PoE2 data file has no influence stats. Sending a filter with no
+        // trade id fails the whole query, so nothing is the right answer.
+        let item = influenced(vec![crate::types::item::Influence::Hunter]);
+
+        let group = build_stat_group_for(
+            &[],
+            Some(&item),
+            &influence_table(),
+            StatFilterOptions::default(),
+        );
+
+        assert!(group.is_none());
     }
 
     #[test]

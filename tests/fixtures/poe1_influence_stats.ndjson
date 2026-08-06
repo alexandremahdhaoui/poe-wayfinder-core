@@ -1,0 +1,6 @@
+{"better":1,"matchers":[{"string":"Has Crusader Influence"}],"ref":"Has Crusader Influence","trade":{"ids":{"pseudo":["pseudo.pseudo_has_crusader_influence"]},"option":false}}
+{"better":1,"matchers":[{"string":"Has Elder Influence"}],"ref":"Has Elder Influence","trade":{"ids":{"pseudo":["pseudo.pseudo_has_elder_influence"]},"option":false}}
+{"better":1,"matchers":[{"string":"Has Hunter Influence"}],"ref":"Has Hunter Influence","trade":{"ids":{"pseudo":["pseudo.pseudo_has_hunter_influence"]},"option":false}}
+{"better":1,"matchers":[{"string":"Has Redeemer Influence"}],"ref":"Has Redeemer Influence","trade":{"ids":{"pseudo":["pseudo.pseudo_has_redeemer_influence"]},"option":false}}
+{"better":1,"matchers":[{"string":"Has Shaper Influence"}],"ref":"Has Shaper Influence","trade":{"ids":{"pseudo":["pseudo.pseudo_has_shaper_influence"]},"option":false}}
+{"better":1,"matchers":[{"string":"Has Warlord Influence"}],"ref":"Has Warlord Influence","trade":{"ids":{"pseudo":["pseudo.pseudo_has_warlord_influence"]},"option":false}}
