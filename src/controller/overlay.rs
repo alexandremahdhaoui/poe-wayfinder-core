@@ -153,6 +153,50 @@ pub fn event_to_hotkey(key: &str, ctrl: bool, shift: bool, alt: bool) -> String 
     parts.join(" + ")
 }
 
+/// One keystroke, and whether it is going down or coming up.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyStroke {
+    pub key: String,
+    /// True for a press, false for a release.
+    pub down: bool,
+}
+
+/// The keystrokes that copy the item under the cursor.
+///
+/// # Why the order is the whole of it
+///
+/// Releasing the modifier before the letter sends a bare C into the game,
+/// which opens the chat box on some layouts and does nothing useful on the
+/// rest. Every press has to be matched by a release in the opposite order, the
+/// way a person's hand does it.
+///
+/// A press left without its release is worse than a failed copy. The game
+/// keeps seeing that key held, and a held modifier changes what every later
+/// key does until the user presses and releases it themselves.
+///
+/// # Why the modifier is Ctrl and not the show mods key
+///
+/// The game used to print the detailed item text only while its own show mods
+/// key was held. Since 3.29 a copy always produces the detailed format, so
+/// Ctrl and C is the whole sequence.
+///
+/// The reference reaches the same place by overwriting the configured key with
+/// Ctrl before using it. Holding the configured key as well is not harmless:
+/// Alt with Ctrl is a different chord and the game may not answer it at all.
+pub fn copy_key_sequence() -> Vec<KeyStroke> {
+    let press = |key: &str| KeyStroke {
+        key: key.to_string(),
+        down: true,
+    };
+
+    let release = |key: &str| KeyStroke {
+        key: key.to_string(),
+        down: false,
+    };
+
+    vec![press("Ctrl"), press("C"), release("C"), release("Ctrl")]
+}
+
 /// The fraction of the window height where the stash panel starts.
 ///
 /// Measured against a 1600 pixel tall client, which is where the reference
@@ -461,5 +505,115 @@ mod tests {
         let mid = f64::from(window().height) * (STASH_TOP + STASH_BOTTOM) / 2.0;
 
         assert!(is_stash_area(100, mid as i32, window(), 600));
+    }
+
+    // -----------------------------------------------------------------
+    // The copy keystrokes
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn the_copy_sequence_is_control_and_c() {
+        let got = copy_key_sequence();
+
+        assert_eq!(got.len(), 4);
+        assert_eq!(got[0].key, "Ctrl");
+        assert_eq!(got[1].key, "C");
+    }
+
+    #[test]
+    fn the_letter_is_released_before_the_modifier() {
+        // Releasing the modifier first sends a bare C into the game, which
+        // opens the chat box on some layouts.
+        let got = copy_key_sequence();
+
+        let c_up = got
+            .iter()
+            .position(|s| s.key == "C" && !s.down)
+            .expect("C is released");
+        let ctrl_up = got
+            .iter()
+            .position(|s| s.key == "Ctrl" && !s.down)
+            .expect("Ctrl is released");
+
+        assert!(c_up < ctrl_up);
+    }
+
+    #[test]
+    fn the_modifier_goes_down_before_the_letter() {
+        // The other order taps C on its own and then holds a modifier over
+        // nothing.
+        let got = copy_key_sequence();
+
+        let ctrl_down = got
+            .iter()
+            .position(|s| s.key == "Ctrl" && s.down)
+            .expect("Ctrl is pressed");
+        let c_down = got
+            .iter()
+            .position(|s| s.key == "C" && s.down)
+            .expect("C is pressed");
+
+        assert!(ctrl_down < c_down);
+    }
+
+    #[test]
+    fn every_press_has_a_release() {
+        // A press left hanging keeps the game seeing that key held, and a held
+        // modifier changes every later key until the user clears it by hand.
+        let got = copy_key_sequence();
+
+        for stroke in got.iter().filter(|s| s.down) {
+            assert!(
+                got.iter().any(|s| s.key == stroke.key && !s.down),
+                "{} was pressed and never released",
+                stroke.key
+            );
+        }
+    }
+
+    #[test]
+    fn no_key_is_released_without_being_pressed() {
+        // The game sees a release it never saw a press for, which on a
+        // movement key means the character keeps running.
+        let got = copy_key_sequence();
+
+        for stroke in got.iter().filter(|s| !s.down) {
+            assert!(
+                got.iter().any(|s| s.key == stroke.key && s.down),
+                "{} was released without being pressed",
+                stroke.key
+            );
+        }
+    }
+
+    #[test]
+    fn the_sequence_nests_rather_than_overlapping() {
+        // Keys have to come up in the reverse order they went down, the way a
+        // hand does it. Interleaved releases are a chord the game never saw.
+        let got = copy_key_sequence();
+
+        let mut held: Vec<&str> = Vec::new();
+
+        for stroke in &got {
+            if stroke.down {
+                held.push(&stroke.key);
+            } else {
+                assert_eq!(
+                    held.pop(),
+                    Some(stroke.key.as_str()),
+                    "{} came up out of order",
+                    stroke.key
+                );
+            }
+        }
+
+        assert!(held.is_empty(), "the sequence ends with keys still held");
+    }
+
+    #[test]
+    fn the_show_mods_key_is_not_held_during_a_copy() {
+        // Since 3.29 a copy always produces the detailed format. Holding Alt
+        // as well makes a different chord that the game may not answer at all.
+        assert!(!copy_key_sequence().iter().any(|s| s.key == "Alt"));
     }
 }
