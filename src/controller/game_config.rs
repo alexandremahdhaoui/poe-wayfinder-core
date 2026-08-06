@@ -27,6 +27,131 @@ const SHOW_ADVANCED: &str = "show_advanced_item_descriptions";
 /// answer even when the config file cannot be found at all.
 pub const DEFAULT_SHOW_MODS_KEY: &str = "Alt";
 
+/// The game's key codes, and what each one is called.
+///
+/// Ported from `ipc/KeyToCode.ts`. The config stores a number and nothing
+/// else, so without this table a hotkey reads as "18" and the user cannot tell
+/// which key that is.
+const KEY_CODES: &[(u32, &str)] = &[
+    (8, "Backspace"),
+    (9, "Tab"),
+    (13, "Enter"),
+    (16, "Shift"),
+    (17, "Ctrl"),
+    (18, "Alt"),
+    (20, "CapsLock"),
+    (27, "Escape"),
+    (32, "Space"),
+    (33, "PageUp"),
+    (34, "PageDown"),
+    (35, "End"),
+    (36, "Home"),
+    (37, "ArrowLeft"),
+    (38, "ArrowUp"),
+    (39, "ArrowRight"),
+    (40, "ArrowDown"),
+    (45, "Insert"),
+    (46, "Delete"),
+    (48, "0"),
+    (49, "1"),
+    (50, "2"),
+    (51, "3"),
+    (52, "4"),
+    (53, "5"),
+    (54, "6"),
+    (55, "7"),
+    (56, "8"),
+    (57, "9"),
+    (65, "A"),
+    (66, "B"),
+    (67, "C"),
+    (68, "D"),
+    (69, "E"),
+    (70, "F"),
+    (71, "G"),
+    (72, "H"),
+    (73, "I"),
+    (74, "J"),
+    (75, "K"),
+    (76, "L"),
+    (77, "M"),
+    (78, "N"),
+    (79, "O"),
+    (80, "P"),
+    (81, "Q"),
+    (82, "R"),
+    (83, "S"),
+    (84, "T"),
+    (85, "U"),
+    (86, "V"),
+    (87, "W"),
+    (88, "X"),
+    (89, "Y"),
+    (90, "Z"),
+    (96, "Numpad0"),
+    (97, "Numpad1"),
+    (98, "Numpad2"),
+    (99, "Numpad3"),
+    (100, "Numpad4"),
+    (101, "Numpad5"),
+    (102, "Numpad6"),
+    (103, "Numpad7"),
+    (104, "Numpad8"),
+    (105, "Numpad9"),
+    (106, "NumpadMultiply"),
+    (107, "NumpadAdd"),
+    (109, "NumpadSubtract"),
+    (110, "NumpadDecimal"),
+    (111, "NumpadDivide"),
+    (112, "F1"),
+    (113, "F2"),
+    (114, "F3"),
+    (115, "F4"),
+    (116, "F5"),
+    (117, "F6"),
+    (118, "F7"),
+    (119, "F8"),
+    (120, "F9"),
+    (121, "F10"),
+    (122, "F11"),
+    (123, "F12"),
+    (124, "F13"),
+    (125, "F14"),
+    (126, "F15"),
+    (127, "F16"),
+    (128, "F17"),
+    (129, "F18"),
+    (130, "F19"),
+    (131, "F20"),
+    (132, "F21"),
+    (133, "F22"),
+    (134, "F23"),
+    (135, "F24"),
+    (186, "Semicolon"),
+    (187, "Equal"),
+    (188, "Comma"),
+    (189, "Minus"),
+    (190, "Period"),
+    (191, "Slash"),
+    (192, "Backquote"),
+    (219, "BracketLeft"),
+    (220, "Backslash"),
+    (221, "BracketRight"),
+    (222, "Quote"),
+];
+
+/// The name of a key code.
+///
+/// Returns nothing for a code this build does not know, so the caller falls
+/// back rather than showing a number. A number is not a key name and telling
+/// the user to hold "18" helps nobody.
+pub fn key_name(code: u32) -> Option<&'static str> {
+    KEY_CODES
+        .iter()
+        .find(|(known, _)| *known == code)
+        .map(|(_, name)| *name)
+}
+
 /// One hotkey read from the game's config.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hotkey {
@@ -117,11 +242,17 @@ pub fn parse_config_hotkey(entry: &str) -> Option<Hotkey> {
 
     let mut parts = entry.split_whitespace();
 
-    let key = parts.next()?;
+    // The game stores a key code and not a key name. Reading it as a name
+    // gives a hotkey that renders as a bare number.
+    let code: u32 = parts.next()?.parse().ok()?;
 
-    if key.is_empty() {
+    // Zero means the action is unbound. Rendering it as a key would tell the
+    // user to hold something the game ignores.
+    if code == 0 {
         return None;
     }
+
+    let key = key_name(code)?;
 
     let modifier = parts.next();
 
@@ -191,25 +322,28 @@ mod tests {
 
     #[test]
     fn a_section_and_key_are_read() {
-        let got = parse_ini("[ACTION_KEYS]\nshow_advanced_item_descriptions=C 2\n");
+        let got = parse_ini("[ACTION_KEYS]\nshow_advanced_item_descriptions=67 2\n");
 
-        assert_eq!(got["ACTION_KEYS"]["show_advanced_item_descriptions"], "C 2");
+        assert_eq!(
+            got["ACTION_KEYS"]["show_advanced_item_descriptions"],
+            "67 2"
+        );
     }
 
     #[test]
     fn the_byte_order_mark_does_not_hide_the_first_section() {
         // Left in place it makes the section name unmatchable and the setting
         // reads as missing.
-        let got = parse_ini("\u{feff}[ACTION_KEYS]\nkey=C\n");
+        let got = parse_ini("\u{feff}[ACTION_KEYS]\nkey=67\n");
 
         assert!(got.contains_key("ACTION_KEYS"));
     }
 
     #[test]
     fn whitespace_around_names_and_values_is_trimmed() {
-        let got = parse_ini("[ ACTION_KEYS ]\n  key  =  C 2  \n");
+        let got = parse_ini("[ ACTION_KEYS ]\n  key  =  67 2  \n");
 
-        assert_eq!(got["ACTION_KEYS"]["key"], "C 2");
+        assert_eq!(got["ACTION_KEYS"]["key"], "67 2");
     }
 
     #[test]
@@ -253,7 +387,7 @@ mod tests {
 
     #[test]
     fn a_bare_key_has_no_modifier() {
-        let got = parse_config_hotkey("C").expect("a key parses");
+        let got = parse_config_hotkey("67").expect("a key parses");
 
         assert_eq!(got.key, "C");
         assert!(!got.ctrl && !got.shift && !got.alt);
@@ -263,14 +397,14 @@ mod tests {
     fn each_modifier_number_maps_to_its_own_key() {
         // The game stores them as numbers, and swapping two would hold the
         // wrong key while copying.
-        assert!(parse_config_hotkey("C 1").expect("parses").shift);
-        assert!(parse_config_hotkey("C 2").expect("parses").ctrl);
-        assert!(parse_config_hotkey("C 3").expect("parses").alt);
+        assert!(parse_config_hotkey("67 1").expect("parses").shift);
+        assert!(parse_config_hotkey("67 2").expect("parses").ctrl);
+        assert!(parse_config_hotkey("67 3").expect("parses").alt);
     }
 
     #[test]
     fn exactly_one_modifier_is_set() {
-        for entry in ["C 1", "C 2", "C 3"] {
+        for entry in ["67 1", "67 2", "67 3"] {
             let got = parse_config_hotkey(entry).expect("parses");
 
             let count = [got.ctrl, got.shift, got.alt]
@@ -286,15 +420,15 @@ mod tests {
     fn a_modifier_number_this_build_does_not_know_reports_nothing() {
         // Falling back to a guess would hold the wrong key and the item comes
         // back without its tiers with nothing saying why.
-        assert_eq!(parse_config_hotkey("C 4"), None);
-        assert_eq!(parse_config_hotkey("C x"), None);
+        assert_eq!(parse_config_hotkey("67 4"), None);
+        assert_eq!(parse_config_hotkey("67 x"), None);
     }
 
     #[test]
     fn an_entry_with_too_many_fields_reports_nothing() {
         // Reading the first two fields of a shape this build does not know
         // produces a confident wrong answer.
-        assert_eq!(parse_config_hotkey("C 2 3"), None);
+        assert_eq!(parse_config_hotkey("67 2 3"), None);
     }
 
     #[test]
@@ -305,14 +439,14 @@ mod tests {
 
     #[test]
     fn a_hotkey_renders_with_its_modifier_first() {
-        let got = parse_config_hotkey("C 2").expect("parses");
+        let got = parse_config_hotkey("67 2").expect("parses");
 
         assert_eq!(got.to_text(), "Ctrl + C");
     }
 
     #[test]
     fn a_bare_key_renders_as_itself() {
-        assert_eq!(parse_config_hotkey("Alt").expect("parses").to_text(), "Alt");
+        assert_eq!(parse_config_hotkey("18").expect("parses").to_text(), "Alt");
     }
 
     #[test]
@@ -336,7 +470,7 @@ mod tests {
     #[test]
     fn the_configured_key_is_used() {
         let got = show_mods_key(&config(
-            "[ACTION_KEYS]\nshow_advanced_item_descriptions=C 2\n",
+            "[ACTION_KEYS]\nshow_advanced_item_descriptions=67 2\n",
         ));
 
         assert_eq!(got, "Ctrl + C");
@@ -353,7 +487,7 @@ mod tests {
     fn an_unreadable_setting_falls_back_rather_than_failing() {
         assert_eq!(
             show_mods_key(&config(
-                "[ACTION_KEYS]\nshow_advanced_item_descriptions=C 9\n"
+                "[ACTION_KEYS]\nshow_advanced_item_descriptions=67 9\n"
             )),
             "Alt"
         );
@@ -364,7 +498,7 @@ mod tests {
         // "Alt, from your config" and "Alt, because we could not read your
         // config" are the same key and very different confidence.
         assert!(show_mods_key_was_read(&config(
-            "[ACTION_KEYS]\nshow_advanced_item_descriptions=Alt\n"
+            "[ACTION_KEYS]\nshow_advanced_item_descriptions=18\n"
         )));
 
         assert!(!show_mods_key_was_read(&config("")));
@@ -374,7 +508,7 @@ mod tests {
     fn a_setting_in_another_section_is_not_used() {
         // A key of the same name elsewhere is a different setting, and reading
         // it would hold a key bound to something else entirely.
-        let got = config("[OTHER]\nshow_advanced_item_descriptions=C 2\n");
+        let got = config("[OTHER]\nshow_advanced_item_descriptions=67 2\n");
 
         assert_eq!(show_mods_key(&got), "Alt");
         assert!(!show_mods_key_was_read(&got));
@@ -383,10 +517,10 @@ mod tests {
     #[test]
     fn a_real_looking_config_reads_the_right_line() {
         let body = "\u{feff}[SOUND]\nmaster_volume=100\n\n\
-                    [ACTION_KEYS]\nmove_item=LeftButton\n\
-                    show_advanced_item_descriptions=LeftAlt 2\n\
-                    highlight=Z\n";
+                    [ACTION_KEYS]\nmove_up=0\n\
+                    show_advanced_item_descriptions=67 2\n\
+                    highlight=90\n";
 
-        assert_eq!(show_mods_key(&config(body)), "Ctrl + LeftAlt");
+        assert_eq!(show_mods_key(&config(body)), "Ctrl + C");
     }
 }
