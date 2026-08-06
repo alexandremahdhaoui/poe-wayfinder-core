@@ -12,6 +12,7 @@
 //! is consumed at most once. That is why the modifier stage appears five times
 //! in the real pipeline. Each occurrence eats a different modifier section.
 
+pub mod magic_name;
 pub mod nameplate;
 pub mod pipeline;
 pub mod sections;

@@ -25,6 +25,7 @@
 
 use crate::types::client_strings as cs;
 use crate::types::modifier::{Generation, ModifierInfo, ModifierType};
+use crate::types::stat::ParsedStat;
 use crate::util::number::leading_float;
 
 /// The em dash the game uses to separate metadata fields.
@@ -281,9 +282,53 @@ pub fn incr_roll(value: f64, percent: f64, decimals: u32) -> f64 {
     (raised * scale).trunc() / scale
 }
 
+/// Rescale a stat's roll by the modifier's roll increase.
+///
+/// Ported from `applyIncr`. Returns nothing when there is nothing to apply, so
+/// the caller keeps the stat it already has rather than replacing it with an
+/// identical copy.
+///
+/// # Why a modifier can raise its own roll
+///
+/// An eldritch implicit prints its base roll and a separate "increased effect"
+/// line. The number the game shows is the two combined, so a filter built from
+/// the printed number alone searches for an item that does not exist.
+///
+/// An unscalable roll is left alone. Some rolls are flat counts the increase
+/// does not touch, and scaling those invents a value the item never had.
+pub fn apply_incr(info: &ModifierInfo, stat: &ParsedStat) -> Option<ParsedStat> {
+    let increase = info.roll_incr?;
+    let roll = stat.roll?;
+
+    // A zero increase scales nothing, so there is no new stat to hand back.
+    if increase == 0.0 {
+        return None;
+    }
+
+    if roll.unscalable {
+        return None;
+    }
+
+    // A roll that carries decimals keeps two of them. Truncating it to a whole
+    // number loses the part the game actually shows.
+    let decimals = if roll.decimals { 2 } else { 0 };
+
+    let mut scaled = roll;
+    scaled.value = incr_roll(roll.value, increase, decimals);
+    scaled.min = incr_roll(roll.min, increase, decimals);
+    scaled.max = incr_roll(roll.max, increase, decimals);
+
+    Some(ParsedStat {
+        reference: stat.reference.clone(),
+        matched: stat.matched.clone(),
+        roll: Some(scaled),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::stat::StatRoll;
 
     fn lines(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
@@ -628,6 +673,167 @@ mod tests {
     // -----------------------------------------------------------------
     // Roll scaling
     // -----------------------------------------------------------------
+
+    // -----------------------------------------------------------------
+    // Applying a roll increase
+    // -----------------------------------------------------------------
+
+    fn stat_with(roll: Option<StatRoll>) -> ParsedStat {
+        ParsedStat {
+            reference: "# to maximum Life".into(),
+            matched: "# to maximum Life".into(),
+            roll,
+        }
+    }
+
+    fn roll_of(value: f64) -> StatRoll {
+        StatRoll {
+            value,
+            min: value,
+            max: value,
+            ..StatRoll::default()
+        }
+    }
+
+    fn info_with_incr(percent: Option<f64>) -> ModifierInfo {
+        ModifierInfo {
+            roll_incr: percent,
+            ..ModifierInfo::default()
+        }
+    }
+
+    #[test]
+    fn a_roll_increase_rescales_the_whole_range() {
+        // The number the game shows is the base and the increase combined, so
+        // a filter built from the base alone searches for a nonexistent item.
+        let got = apply_incr(
+            &info_with_incr(Some(20.0)),
+            &stat_with(Some(roll_of(100.0))),
+        )
+        .expect("an increase applies");
+
+        let roll = got.roll.expect("the roll survives");
+
+        assert_eq!(roll.value, 120.0);
+        assert_eq!(roll.min, 120.0);
+        assert_eq!(roll.max, 120.0);
+    }
+
+    #[test]
+    fn the_bounds_are_scaled_independently() {
+        let mut roll = roll_of(0.0);
+        roll.value = 50.0;
+        roll.min = 40.0;
+        roll.max = 60.0;
+
+        let got = apply_incr(&info_with_incr(Some(50.0)), &stat_with(Some(roll)))
+            .expect("an increase applies")
+            .roll
+            .expect("the roll survives");
+
+        assert_eq!((got.min, got.value, got.max), (60.0, 75.0, 90.0));
+    }
+
+    #[test]
+    fn a_modifier_with_no_increase_changes_nothing() {
+        // The caller keeps the stat it already has rather than replacing it
+        // with an identical copy.
+        assert_eq!(
+            apply_incr(&info_with_incr(None), &stat_with(Some(roll_of(100.0)))),
+            None
+        );
+    }
+
+    #[test]
+    fn a_stat_with_no_roll_changes_nothing() {
+        assert_eq!(
+            apply_incr(&info_with_incr(Some(20.0)), &stat_with(None)),
+            None
+        );
+    }
+
+    #[test]
+    fn an_unscalable_roll_is_left_alone() {
+        // Some rolls are flat counts the increase does not touch, and scaling
+        // those invents a value the item never had.
+        let mut roll = roll_of(100.0);
+        roll.unscalable = true;
+
+        assert_eq!(
+            apply_incr(&info_with_incr(Some(20.0)), &stat_with(Some(roll))),
+            None
+        );
+    }
+
+    #[test]
+    fn a_decimal_roll_keeps_its_decimals() {
+        // Truncating to a whole number loses the part the game shows.
+        let mut roll = roll_of(10.0);
+        roll.decimals = true;
+
+        let got = apply_incr(&info_with_incr(Some(15.0)), &stat_with(Some(roll)))
+            .expect("an increase applies")
+            .roll
+            .expect("the roll survives");
+
+        assert_eq!(got.value, 11.5);
+    }
+
+    #[test]
+    fn a_whole_roll_stays_whole() {
+        let got = apply_incr(&info_with_incr(Some(15.0)), &stat_with(Some(roll_of(10.0))))
+            .expect("an increase applies")
+            .roll
+            .expect("the roll survives");
+
+        assert_eq!(got.value, 11.0);
+    }
+
+    #[test]
+    fn scaling_keeps_the_stat_identity() {
+        // A rescaled stat is the same stat. Losing the reference would send a
+        // filter for nothing.
+        let stat = stat_with(Some(roll_of(100.0)));
+
+        let got = apply_incr(&info_with_incr(Some(20.0)), &stat).expect("an increase applies");
+
+        assert_eq!(got.reference, stat.reference);
+        assert_eq!(got.matched, stat.matched);
+    }
+
+    #[test]
+    fn scaling_keeps_the_roll_flags() {
+        let mut roll = roll_of(100.0);
+        roll.legacy = true;
+
+        let got = apply_incr(&info_with_incr(Some(20.0)), &stat_with(Some(roll)))
+            .expect("an increase applies")
+            .roll
+            .expect("the roll survives");
+
+        assert!(got.legacy);
+    }
+
+    #[test]
+    fn a_zero_increase_leaves_the_value_where_it_was() {
+        let got = apply_incr(&info_with_incr(Some(0.0)), &stat_with(Some(roll_of(100.0))));
+
+        // Zero is falsy in the reference, so it reports nothing to apply.
+        assert_eq!(got, None);
+    }
+
+    #[test]
+    fn a_negative_roll_scales_away_from_zero() {
+        let got = apply_incr(
+            &info_with_incr(Some(20.0)),
+            &stat_with(Some(roll_of(-10.0))),
+        )
+        .expect("an increase applies")
+        .roll
+        .expect("the roll survives");
+
+        assert_eq!(got.value, -12.0);
+    }
 
     #[test]
     fn a_roll_increase_scales_a_whole_number() {

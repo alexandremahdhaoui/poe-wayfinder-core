@@ -114,6 +114,13 @@ pub struct StatFilter {
     /// A disabled filter still travels so the trade site's own UI shows it
     /// greyed out when the user opens the link.
     pub disabled: bool,
+    /// Never shown and never sent.
+    ///
+    /// A filter can be built and still be wrong to offer. A corrupted item's
+    /// implicit cannot be changed, so filtering on it narrows the search to
+    /// items identical to the one in hand. It stays in the list so the code
+    /// that groups filters still sees it, and it stays out of the UI.
+    pub hidden: bool,
 }
 
 impl StatFilter {
@@ -124,6 +131,7 @@ impl StatFilter {
             range,
             option: None,
             disabled: false,
+            hidden: false,
         }
     }
 }
