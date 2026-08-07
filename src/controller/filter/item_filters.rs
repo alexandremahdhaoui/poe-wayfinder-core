@@ -200,12 +200,14 @@ fn apply_misc_filters(item: &ParsedItem, out: &mut Filters) {
 
     // Only stated when the item is unidentified. An identified item is the
     // normal case and saying so narrows nothing.
-    if item.is_unidentified {
-        misc.identified = Some(false);
-    }
-
-    if let Some(tier) = item.unidentified_tier {
-        misc.unidentified_tier = Range::exactly(f64::from(tier));
+    //
+    // The tier replaces the flag rather than joining it. A tiered
+    // unidentified item is unidentified by definition, so the flag adds
+    // nothing, and the reference asserts the two are never sent together.
+    match item.unidentified_tier {
+        Some(tier) => misc.unidentified_tier = Range::exactly(f64::from(tier)),
+        None if item.is_unidentified => misc.identified = Some(false),
+        None => {}
     }
 
     if let Some(level) = item.gem_level {
@@ -432,6 +434,41 @@ mod tests {
 
         assert_eq!(q.name.as_ref().unwrap().name(), "Kaom's Heart");
         assert_eq!(q.type_name, None);
+    }
+
+    #[test]
+    fn an_unidentified_item_says_so() {
+        let item = ParsedItem {
+            rarity: Some(ItemRarity::Rare),
+            is_unidentified: true,
+            ..ParsedItem::default()
+        };
+
+        let q = build_query(&item, FilterOptions::default());
+
+        assert_eq!(q.filters.misc_filters.identified, Some(false));
+        assert_eq!(q.filters.misc_filters.unidentified_tier, Range::default());
+    }
+
+    #[test]
+    fn a_tiered_unidentified_item_sends_the_tier_instead_of_the_flag() {
+        // The reference asserts the two are never sent together. A tiered
+        // unidentified item is unidentified by definition, so the flag adds
+        // nothing to a filter that already implies it.
+        let item = ParsedItem {
+            rarity: Some(ItemRarity::Rare),
+            is_unidentified: true,
+            unidentified_tier: Some(4),
+            ..ParsedItem::default()
+        };
+
+        let q = build_query(&item, FilterOptions::default());
+
+        assert_eq!(q.filters.misc_filters.identified, None);
+        assert_eq!(
+            q.filters.misc_filters.unidentified_tier,
+            Range::exactly(4.0)
+        );
     }
 
     #[test]
