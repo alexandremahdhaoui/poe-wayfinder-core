@@ -173,6 +173,19 @@ pub fn parse_mod_info_line(line: &str, kind: ModifierType) -> ModifierInfo {
 /// Read the first metadata field.
 ///
 /// It holds the modifier's type word, then an optional quoted name, then an
+/// Take the crafted marker off a type word, in either game's spelling.
+///
+/// PoE2 prints `Crafted Prefix Modifier` and PoE1 prints
+/// `Master Crafted Prefix Modifier`. The longer one is tried first, because
+/// `Master Crafted` does not begin with `Crafted` and a single check for
+/// either spelling misses the other.
+fn strip_crafted(type_word: &str) -> Option<&str> {
+    type_word
+        .strip_prefix(cs::MASTER_CRAFTED_MODIFIER)
+        .or_else(|| type_word.strip_prefix(cs::CRAFTED_MODIFIER))
+        .map(str::trim)
+}
+
 /// optional tier and rank.
 fn read_head(head: &str, info: &mut ModifierInfo) {
     let (type_word, rest) = split_type_word(head);
@@ -190,8 +203,8 @@ fn read_head(head: &str, info: &mut ModifierInfo) {
         if info.kind != Some(ModifierType::Fractured) {
             info.kind = Some(ModifierType::Desecrated);
         }
-    } else if let Some(stripped) = type_word.strip_prefix(cs::CRAFTED_MODIFIER) {
-        type_word = stripped.trim();
+    } else if let Some(stripped) = strip_crafted(type_word) {
+        type_word = stripped;
 
         if info.kind != Some(ModifierType::Fractured) {
             info.kind = Some(ModifierType::Crafted);
@@ -392,6 +405,37 @@ mod tests {
 
         assert_eq!(kind, ModifierType::Implicit);
         assert_eq!(out, vec!["+25 to maximum Life"]);
+    }
+
+    #[test]
+    fn both_games_spellings_of_the_crafted_marker_are_read() {
+        // PoE2 prints "Crafted Prefix Modifier" and PoE1 prints
+        // "Master Crafted Prefix Modifier". The constant held only the PoE1
+        // one, so every PoE2 crafted modifier read as an ordinary explicit and
+        // lost its generation with it.
+        for line in [
+            "{ Crafted Prefix Modifier \"Gentian\" (Tier: 6) — Mana }",
+            "{ Master Crafted Prefix Modifier \"Gentian\" (Tier: 6) — Mana }",
+        ] {
+            let got = parse_mod_info_line(line, ModifierType::Explicit);
+
+            assert_eq!(got.kind, Some(ModifierType::Crafted), "{line}");
+            assert_eq!(got.generation, Some(Generation::Prefix), "{line}");
+            assert_eq!(got.name.as_deref(), Some("Gentian"), "{line}");
+        }
+    }
+
+    #[test]
+    fn the_longer_crafted_spelling_is_tried_first() {
+        // "Master Crafted" does not begin with "Crafted", so checking the
+        // short one first leaves "Master " on the front of the type word and
+        // the generation never matches.
+        let got = parse_mod_info_line(
+            "{ Master Crafted Suffix Modifier \"of Mana\" (Tier: 1) }",
+            ModifierType::Explicit,
+        );
+
+        assert_eq!(got.generation, Some(Generation::Suffix));
     }
 
     #[test]

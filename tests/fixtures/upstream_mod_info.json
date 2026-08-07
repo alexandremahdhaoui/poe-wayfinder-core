@@ -1,0 +1,472 @@
+[
+ {
+  "rawText": "{ Prefix Modifier \"Crackling\" (Tier: 7) \u2014 Damage, Elemental, Lightning, Attack }\nAdds 1(1-4) to 50(46-66) Lightning Damage\n",
+  "type": "Explicit",
+  "generation": "prefix",
+  "name": "Crackling",
+  "tier": 7,
+  "rank": null,
+  "tags": [
+   "Damage",
+   "Elemental",
+   "Lightning",
+   "Attack"
+  ]
+ },
+ {
+  "rawText": "{ Suffix Modifier \"of the Brute\" (Tier: 8) \u2014 Attribute }\n+8(5-8) to Strength\n",
+  "type": "Explicit",
+  "generation": "suffix",
+  "name": "of the Brute",
+  "tier": 8,
+  "rank": null,
+  "tags": [
+   "Attribute"
+  ]
+ },
+ {
+  "rawText": "{ Prefix Modifier \"Shocking\" (Tier: 4) \u2014 Damage, Elemental, Lightning, Attack }\nAdds 5(1-5) to 82(62-89) Lightning Damage\n",
+  "type": "Explicit",
+  "generation": "prefix",
+  "name": "Shocking",
+  "tier": 4,
+  "rank": null,
+  "tags": [
+   "Damage",
+   "Elemental",
+   "Lightning",
+   "Attack"
+  ]
+ },
+ {
+  "rawText": "{ Prefix Modifier \"Scorching\" (Tier: 5) \u2014 Damage, Elemental, Fire, Attack }\nAdds 27(20-30) to 36(31-46) Fire Damage\n",
+  "type": "Explicit",
+  "generation": "prefix",
+  "name": "Scorching",
+  "tier": 5,
+  "rank": null,
+  "tags": [
+   "Damage",
+   "Elemental",
+   "Fire",
+   "Attack"
+  ]
+ },
+ {
+  "rawText": "{ Prefix Modifier \"Icy\" (Tier: 8) \u2014 Damage, Elemental, Cold, Attack }\nAdds 9(6-9) to 13(10-15) Cold Damage\n",
+  "type": "Explicit",
+  "generation": "prefix",
+  "name": "Icy",
+  "tier": 8,
+  "rank": null,
+  "tags": [
+   "Damage",
+   "Elemental",
+   "Cold",
+   "Attack"
+  ]
+ },
+ {
+  "rawText": "{ Suffix Modifier \"of Radiance\" (Tier: 1) \u2014 Attack }\n+57(41-60) to Accuracy Rating\n15% increased Light Radius\n",
+  "type": "Explicit",
+  "generation": "suffix",
+  "name": "of Radiance",
+  "tier": 1,
+  "rank": null,
+  "tags": [
+   "Attack"
+  ]
+ },
+ {
+  "rawText": "{ Unique Modifier \u2014 Defences }\n56(50-70)% increased Energy Shield\n",
+  "type": "Explicit",
+  "generation": null,
+  "name": null,
+  "tier": null,
+  "rank": null,
+  "tags": [
+   "Defences"
+  ]
+ },
+ {
+  "rawText": "{ Unique Modifier \u2014 Mana }\n40% increased Mana Regeneration Rate while stationary\n",
+  "type": "Explicit",
+  "generation": null,
+  "name": null,
+  "tier": null,
+  "rank": null,
+  "tags": [
+   "Mana"
+  ]
+ },
+ {
+  "rawText": "{ Unique Modifier \u2014 Elemental, Lightning, Resistance }\n+26(20-30)% to Lightning Resistance\n",
+  "type": "Explicit",
+  "generation": null,
+  "name": null,
+  "tier": null,
+  "rank": null,
+  "tags": [
+   "Elemental",
+   "Lightning",
+   "Resistance"
+  ]
+ },
+ {
+  "rawText": "{ Unique Modifier \u2014 Elemental, Lightning, Resistance }\n+5% to Maximum Lightning Resistance\n",
+  "type": "Explicit",
+  "generation": null,
+  "name": null,
+  "tier": null,
+  "rank": null,
+  "tags": [
+   "Elemental",
+   "Lightning",
+   "Resistance"
+  ]
+ },
+ {
+  "rawText": "{ Unique Modifier \u2014 Mana }\n40% increased Mana Regeneration Rate\n",
+  "type": "Explicit",
+  "generation": null,
+  "name": null,
+  "tier": null,
+  "rank": null,
+  "tags": [
+   "Mana"
+  ]
+ },
+ {
+  "rawText": "{ Prefix Modifier \"Vaporous\" (Tier: 3) \u2014 Defences }\n+143(124-151) to Evasion Rating\n",
+  "type": "Explicit",
+  "generation": "prefix",
+  "name": "Vaporous",
+  "tier": 3,
+  "rank": null,
+  "tags": [
+   "Defences"
+  ]
+ },
+ {
+  "rawText": "{ Suffix Modifier \"of the Wrestler\" (Tier: 7) \u2014 Attribute }\n+12(9-12) to Strength\n",
+  "type": "Explicit",
+  "generation": "suffix",
+  "name": "of the Wrestler",
+  "tier": 7,
+  "rank": null,
+  "tags": [
+   "Attribute"
+  ]
+ },
+ {
+  "rawText": "{ Suffix Modifier \"of Warmth\" (Tier: 3) \u2014 Mana }\n8(8-12)% increased Mana Regeneration Rate\n5% increased Light Radius\n",
+  "type": "Explicit",
+  "generation": "suffix",
+  "name": "of Warmth",
+  "tier": 3,
+  "rank": null,
+  "tags": [
+   "Mana"
+  ]
+ },
+ {
+  "rawText": "{ Suffix Modifier \"of the Penguin\" (Tier: 7) \u2014 Elemental, Cold, Resistance }\n+15(11-15)% to Cold Resistance\n",
+  "type": "Explicit",
+  "generation": "suffix",
+  "name": "of the Penguin",
+  "tier": 7,
+  "rank": null,
+  "tags": [
+   "Elemental",
+   "Cold",
+   "Resistance"
+  ]
+ },
+ {
+  "rawText": "{ Implicit Modifier \u2014 Elemental, Fire, Cold, Lightning, Resistance }\n+8(7-10)% to all Elemental Resistances\n",
+  "type": "Implicit",
+  "generation": null,
+  "name": null,
+  "tier": null,
+  "rank": null,
+  "tags": [
+   "Elemental",
+   "Fire",
+   "Cold",
+   "Lightning",
+   "Resistance"
+  ]
+ },
+ {
+  "rawText": "{ Prefix Modifier \"Merciless\" (Tier: 1) \u2014 Damage, Physical, Attack }\n173(170-179)% increased Physical Damage\n",
+  "type": "Explicit",
+  "generation": "prefix",
+  "name": "Merciless",
+  "tier": 1,
+  "rank": null,
+  "tags": [
+   "Damage",
+   "Physical",
+   "Attack"
+  ]
+ },
+ {
+  "rawText": "{ Prefix Modifier \"Dictator's\" (Tier: 1) \u2014 Damage, Physical, Attack }\n78(75-79)% increased Physical Damage\n+175(175-200) to Accuracy Rating\n",
+  "type": "Explicit",
+  "generation": "prefix",
+  "name": "Dictator's",
+  "tier": 1,
+  "rank": null,
+  "tags": [
+   "Damage",
+   "Physical",
+   "Attack"
+  ]
+ },
+ {
+  "rawText": "{ Prefix Modifier \"Flaring\" (Tier: 1) \u2014 Damage, Physical, Attack }\nAdds 54(37-55) to 94(63-94) Physical Damage (desecrated)\n",
+  "type": "Desecrated",
+  "generation": "prefix",
+  "name": "Flaring",
+  "tier": 1,
+  "rank": null,
+  "tags": [
+   "Damage",
+   "Physical",
+   "Attack"
+  ]
+ },
+ {
+  "rawText": "{ Suffix Modifier \"of Infamy\" \u2014 Attack, Speed }\n25(23-25)% increased Attack Speed (fractured)\n",
+  "type": "Fractured",
+  "generation": "suffix",
+  "name": "of Infamy",
+  "tier": null,
+  "rank": null,
+  "tags": [
+   "Attack",
+   "Speed"
+  ]
+ },
+ {
+  "rawText": "{ Suffix Modifier \"of the Sniper\" (Tier: 1) }\n+7 to Level of all Projectile Skills\n",
+  "type": "Explicit",
+  "generation": "suffix",
+  "name": "of the Sniper",
+  "tier": 1,
+  "rank": null,
+  "tags": []
+ },
+ {
+  "rawText": "{ Suffix Modifier \"of Bursting\" (Tier: 1) \u2014 Attack }\nLoads 2 additional bolts\n",
+  "type": "Explicit",
+  "generation": "suffix",
+  "name": "of Bursting",
+  "tier": 1,
+  "rank": null,
+  "tags": [
+   "Attack"
+  ]
+ },
+ {
+  "rawText": "{ Prefix Modifier \"Impenetrable\" (Tier: 1) \u2014 Defences }\n103(101-110)% increased Armour\n",
+  "type": "Explicit",
+  "generation": "prefix",
+  "name": "Impenetrable",
+  "tier": 1,
+  "rank": null,
+  "tags": [
+   "Defences"
+  ]
+ },
+ {
+  "rawText": "{ Prefix Modifier \"Hardened\" (Tier: 1) \u2014 Defences }\n+70(70-86) to Armour\n41(39-42)% increased Armour\n",
+  "type": "Explicit",
+  "generation": "prefix",
+  "name": "Hardened",
+  "tier": 1,
+  "rank": null,
+  "tags": [
+   "Defences"
+  ]
+ },
+ {
+  "rawText": "{ Prefix Modifier \"Unmoving\" (Tier: 2) \u2014 Defences }\n+256(226-256) to Armour (desecrated)\n",
+  "type": "Desecrated",
+  "generation": "prefix",
+  "name": "Unmoving",
+  "tier": 2,
+  "rank": null,
+  "tags": [
+   "Defences"
+  ]
+ },
+ {
+  "rawText": "{ Suffix Modifier \"of the Titan\" (Tier: 1) \u2014 Attribute }\n+32(31-33) to Strength\n",
+  "type": "Explicit",
+  "generation": "suffix",
+  "name": "of the Titan",
+  "tier": 1,
+  "rank": null,
+  "tags": [
+   "Attribute"
+  ]
+ },
+ {
+  "rawText": "{ Suffix Modifier \"of Allaying\" (Tier: 3) \u2014 Physical, Ailment }\n48(50-46)% reduced Duration of Bleeding on You\n",
+  "type": "Explicit",
+  "generation": "suffix",
+  "name": "of Allaying",
+  "tier": 3,
+  "rank": null,
+  "tags": [
+   "Physical",
+   "Ailment"
+  ]
+ },
+ {
+  "rawText": "{ Suffix Modifier \"of the Essence\" (Tier: 1) }\nHits against you have 44(40-50)% reduced Critical Damage Bonus\n",
+  "type": "Explicit",
+  "generation": "suffix",
+  "name": "of the Essence",
+  "tier": 1,
+  "rank": null,
+  "tags": []
+ },
+ {
+  "rawText": "{ Prefix Modifier \"Malignant\" (Tier: 4) \u2014 Damage, Chaos }\n71(65-74)% increased Chaos Damage\n",
+  "type": "Explicit",
+  "generation": "prefix",
+  "name": "Malignant",
+  "tier": 4,
+  "rank": null,
+  "tags": [
+   "Damage",
+   "Chaos"
+  ]
+ },
+ {
+  "rawText": "{ Prefix Modifier \"Frostbound\" (Tier: 1) \u2014 Damage, Elemental, Cold }\nGain 28(28-30)% of Damage as Extra Cold Damage\n",
+  "type": "Explicit",
+  "generation": "prefix",
+  "name": "Frostbound",
+  "tier": 1,
+  "rank": null,
+  "tags": [
+   "Damage",
+   "Elemental",
+   "Cold"
+  ]
+ },
+ {
+  "rawText": "{ Suffix Modifier \"of the Hearth\" (Tier: 1) \u2014 Mana }\n22(18-22)% increased Mana Regeneration Rate\n15% increased Light Radius\n",
+  "type": "Explicit",
+  "generation": "suffix",
+  "name": "of the Hearth",
+  "tier": 1,
+  "rank": null,
+  "tags": [
+   "Mana"
+  ]
+ },
+ {
+  "rawText": "{ Suffix Modifier \"of the Apt\" (Tier: 4) }\n20% reduced Attribute Requirements\n",
+  "type": "Explicit",
+  "generation": "suffix",
+  "name": "of the Apt",
+  "tier": 4,
+  "rank": null,
+  "tags": []
+ },
+ {
+  "rawText": "{ Implicit Modifier }\n18(12-20)% increased Rarity of Items found\n",
+  "type": "Implicit",
+  "generation": null,
+  "name": null,
+  "tier": null,
+  "rank": null,
+  "tags": []
+ },
+ {
+  "rawText": "{ Prefix Modifier \"Lady's\" (Tier: 5) }\n+30(30-33) to Spirit\n",
+  "type": "Explicit",
+  "generation": "prefix",
+  "name": "Lady's",
+  "tier": 5,
+  "rank": null,
+  "tags": []
+ },
+ {
+  "rawText": "{ Prefix Modifier \"Gentian\" (Tier: 6) \u2014 Mana }\n+90(90-104) to maximum Mana\n",
+  "type": "Explicit",
+  "generation": "prefix",
+  "name": "Gentian",
+  "tier": 6,
+  "rank": null,
+  "tags": [
+   "Mana"
+  ]
+ },
+ {
+  "rawText": "{ Prefix Modifier \"Incanter's\" (Tier: 1) \u2014 Damage, Caster }\n29(27-30)% increased Spell Damage\n",
+  "type": "Explicit",
+  "generation": "prefix",
+  "name": "Incanter's",
+  "tier": 1,
+  "rank": null,
+  "tags": [
+   "Damage",
+   "Caster"
+  ]
+ },
+ {
+  "rawText": "{ Fractured Suffix Modifier \"of the Ice\" (Tier: 2) \u2014 Elemental, Cold, Resistance }\n+37(36-40)% to Cold Resistance\n",
+  "type": "Fractured",
+  "generation": "suffix",
+  "name": "of the Ice",
+  "tier": 2,
+  "rank": null,
+  "tags": [
+   "Elemental",
+   "Cold",
+   "Resistance"
+  ]
+ },
+ {
+  "rawText": "{ Suffix Modifier \"of the Sorcerer\" (Tier: 1) \u2014 Caster, Gem }\n+3 to Level of all Spell Skills\n",
+  "type": "Explicit",
+  "generation": "suffix",
+  "name": "of the Sorcerer",
+  "tier": 1,
+  "rank": null,
+  "tags": [
+   "Caster",
+   "Gem"
+  ]
+ },
+ {
+  "rawText": "{ Desecrated Suffix Modifier \"of Amanamu\" (Tier: 1) \u2014 Elemental, Fire, Chaos, Resistance }\n+17(13-17)% to Fire and Chaos Resistances\n",
+  "type": "Desecrated",
+  "generation": "suffix",
+  "name": "of Amanamu",
+  "tier": 1,
+  "rank": null,
+  "tags": [
+   "Elemental",
+   "Fire",
+   "Chaos",
+   "Resistance"
+  ]
+ },
+ {
+  "rawText": "{ Crafted Prefix Modifier \"Gentian\" (Tier: 6) \u2014 Mana }\n+90(90-104) to maximum Mana\n",
+  "type": "Crafted",
+  "generation": "prefix",
+  "name": "Gentian",
+  "tier": 6,
+  "rank": null,
+  "tags": [
+   "Mana"
+  ]
+ }
+]

@@ -132,7 +132,15 @@ pub const VOIDSTONE_HELP: &str = "Socket this into your Atlas to increase the Ti
 pub const PREFIX_MODIFIER: &str = "Prefix Modifier";
 pub const SUFFIX_MODIFIER: &str = "Suffix Modifier";
 pub const IMPLICIT_MODIFIER: &str = "Implicit Modifier";
-pub const CRAFTED_MODIFIER: &str = "Master Crafted";
+/// PoE2 spelling. PoE1 writes `Master Crafted` for the same marker, which is
+/// what this held until every PoE2 crafted modifier read as an ordinary
+/// explicit and lost its generation with it.
+pub const CRAFTED_MODIFIER: &str = "Crafted";
+/// The PoE1 spelling of the same marker.
+///
+/// Checked first, because `Master Crafted` does not start with `Crafted` and
+/// the two have to be tried separately.
+pub const MASTER_CRAFTED_MODIFIER: &str = "Master Crafted";
 pub const FRACTURED_MODIFIER: &str = "Fractured";
 pub const DESECRATED_MODIFIER: &str = "Desecrated";
 pub const CORRUPTED_IMPLICIT: &str = "Corruption Implicit Modifier";
