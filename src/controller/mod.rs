@@ -4,6 +4,7 @@ pub mod aggregate;
 pub mod bulk;
 pub mod calc;
 pub mod chat;
+pub mod elevation;
 pub mod filter;
 pub mod game_config;
 pub mod listing;
