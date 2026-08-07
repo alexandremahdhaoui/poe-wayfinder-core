@@ -21,10 +21,40 @@ use crate::types::item::{ItemRarity, MapBlighted};
 
 /// Rewrite the name into the form the data file uses.
 pub fn normalize_name(state: &mut ParserState<'_>) -> Result<(), ParseError> {
+    strip_magic_affixes(state);
     strip_blight_prefix(state);
     normalise_metamorph_organ(state);
 
     Ok(())
+}
+
+/// Cut a magic item's rolled affixes off its name.
+///
+/// A magic item is named for its affixes: `Pulsing Antler Focus of Nourishment`
+/// is an `Antler Focus`. Nothing in the text says where the affixes end, so the
+/// item table decides, which is what `magic_base_type` is for.
+///
+/// # Why this line was the whole bug
+///
+/// `magic_base_type` was written and tested and then never called. The
+/// reference calls it from `normalizeName`; ours did not. So every magic item
+/// went to the database under its full rolled name, matched nothing, and was
+/// searched for by a name no base has. An empty result reads as "this item is
+/// worthless".
+///
+/// A base the data does not know leaves the name alone. Searching by the
+/// rolled name finds nothing, which is wrong, but inventing a shorter base
+/// would search for the wrong item, which is worse.
+fn strip_magic_affixes(state: &mut ParserState<'_>) {
+    if state.item.rarity != Some(ItemRarity::Magic) {
+        return;
+    }
+
+    if let Some(base) =
+        crate::controller::parse::magic_name::magic_base_type(&state.name, state.data, state.game)
+    {
+        state.name = base;
+    }
 }
 
 /// Take `Blighted ` or `Blight-ravaged ` off a map name.
@@ -372,6 +402,89 @@ mod tests {
 
         // The unique table won, not the item table.
         assert_eq!(s.item.category, Some(ItemCategory::BodyArmour));
+    }
+
+    #[test]
+    fn a_magic_item_is_looked_up_by_its_base_and_not_its_rolled_name() {
+        // magic_base_type was written, tested, and never called. Every magic
+        // item went to the database under its full rolled name, matched
+        // nothing, and was searched for by a name no base has.
+        let data = table(vec![(
+            Namespace::Item,
+            BaseInfo {
+                name: "Antler Focus".into(),
+                reference_name: "Antler Focus".into(),
+                craftable: true,
+                ..BaseInfo::default()
+            },
+        )]);
+
+        let mut s = state_with(&data, "Pulsing Antler Focus of Nourishment");
+        s.item.rarity = Some(ItemRarity::Magic);
+
+        normalize_name(&mut s).unwrap();
+
+        assert_eq!(s.name, "Antler Focus");
+    }
+
+    #[test]
+    fn a_rare_keeps_its_rolled_name() {
+        // A rare's name is random and is never a base. Running the magic strip
+        // on one would cut words off a name that means nothing anyway, and
+        // could match a base by accident.
+        let data = table(vec![(
+            Namespace::Item,
+            BaseInfo {
+                name: "Antler Focus".into(),
+                reference_name: "Antler Focus".into(),
+                craftable: true,
+                ..BaseInfo::default()
+            },
+        )]);
+
+        let mut s = state_with(&data, "Vengeance Antler Focus Whorl");
+        s.item.rarity = Some(ItemRarity::Rare);
+
+        normalize_name(&mut s).unwrap();
+
+        assert_eq!(s.name, "Vengeance Antler Focus Whorl");
+    }
+
+    #[test]
+    fn a_magic_item_whose_base_is_unknown_keeps_its_name() {
+        // Searching by the rolled name finds nothing, which is wrong.
+        // Inventing a shorter base searches for the wrong item, which is
+        // worse.
+        let data = table(vec![]);
+
+        let mut s = state_with(&data, "Pulsing Antler Focus of Nourishment");
+        s.item.rarity = Some(ItemRarity::Magic);
+
+        normalize_name(&mut s).unwrap();
+
+        assert_eq!(s.name, "Pulsing Antler Focus of Nourishment");
+    }
+
+    #[test]
+    fn a_magic_base_must_be_craftable_to_count() {
+        // A currency or gem name appearing inside a magic item's affixes must
+        // not be mistaken for its base.
+        let data = table(vec![(
+            Namespace::Item,
+            BaseInfo {
+                name: "Antler Focus".into(),
+                reference_name: "Antler Focus".into(),
+                craftable: false,
+                ..BaseInfo::default()
+            },
+        )]);
+
+        let mut s = state_with(&data, "Pulsing Antler Focus of Nourishment");
+        s.item.rarity = Some(ItemRarity::Magic);
+
+        normalize_name(&mut s).unwrap();
+
+        assert_eq!(s.name, "Pulsing Antler Focus of Nourishment");
     }
 
     #[test]
