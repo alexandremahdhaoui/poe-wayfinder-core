@@ -40,10 +40,12 @@ pub fn parse_map(section: &[String], state: &mut ParserState) -> ParseOutcome {
 /// A waystone prints no tier of its own. The tier comes from the base, which
 /// is why this stage needs the database lookup to have run already.
 ///
-/// Two fields the reference reads are not ported. `WAYSTONE_MONSTER_RARITY`
-/// and `WAYSTONE_EFFECTIVENESS` are declared in its interface but absent from
-/// its English data file, so those branches compare against `undefined` and
-/// can never match. Porting them would carry dead code across.
+/// # A note that was wrong
+///
+/// This used to say `WAYSTONE_MONSTER_RARITY` and `WAYSTONE_EFFECTIVENESS`
+/// were absent from the reference's English data file and so not worth
+/// porting. They are in it, at lines 98 and 99, and a waystone printing either
+/// had that number silently dropped.
 pub fn parse_waystone(section: &[String], state: &mut ParserState) -> ParseOutcome {
     let Some(first) = section.first() else {
         return ParseOutcome::SectionSkipped;
@@ -74,6 +76,10 @@ pub fn parse_waystone(section: &[String], state: &mut ParserState) -> ParseOutco
             state.item.map.item_rarity = leading_int(rest).map(|v| v as f64);
         } else if let Some(rest) = line.strip_prefix(cs::WAYSTONE_GOLD) {
             state.item.map.gold = leading_int(rest).map(|v| v as f64);
+        } else if let Some(rest) = line.strip_prefix(cs::WAYSTONE_MONSTER_RARITY) {
+            state.item.map.monster_rarity = leading_int(rest).map(|v| v as f64);
+        } else if let Some(rest) = line.strip_prefix(cs::WAYSTONE_EFFECTIVENESS) {
+            state.item.map.effectiveness = leading_int(rest).map(|v| v as f64);
         }
     }
 
@@ -318,12 +324,17 @@ mod tests {
         s.item.info.map_tier = Some(15);
 
         let out = parse_waystone(
+            // PoE2 prints "Pack Size", not "Monster Pack Size". This fixture
+            // used the PoE1 spelling, which matched the constant that was
+            // wrong, so the test agreed with the bug.
             &sec(&[
                 "Revives Available: 6",
-                "Monster Pack Size: +20%",
+                "Pack Size: +20%",
                 "Item Rarity: +40%",
                 "Waystone Drop Chance: +100%",
                 "Gold Found: +75%",
+                "Monster Rarity: +32%",
+                "Monster Effectiveness: +45%",
             ]),
             &mut s,
         );
@@ -332,6 +343,8 @@ mod tests {
         assert_eq!(s.item.map.tier, Some(15));
         assert_eq!(s.item.map.revives, Some(6));
         assert_eq!(s.item.map.pack_size, Some(20.0));
+        assert_eq!(s.item.map.monster_rarity, Some(32.0));
+        assert_eq!(s.item.map.effectiveness, Some(45.0));
         assert_eq!(s.item.map.item_rarity, Some(40.0));
         assert_eq!(s.item.map.drop_chance, Some(100.0));
         assert_eq!(s.item.map.gold, Some(75.0));

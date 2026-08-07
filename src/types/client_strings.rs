@@ -78,12 +78,18 @@ pub const HYPHEN: &str = "-";
 // ---------------------------------------------------------------------------
 
 pub const WAYSTONE_REVIVES: &str = "Revives Available: ";
-pub const WAYSTONE_PACK_SIZE: &str = "Monster Pack Size: ";
+/// PoE2 spelling. PoE1 writes `Monster Pack Size: ` for the same idea, which
+/// is what this held until a waystone's pack size came back empty every time.
+pub const WAYSTONE_PACK_SIZE: &str = "Pack Size: ";
+/// The PoE1 spelling of the same line.
+pub const MAP_MONSTER_PACK_SIZE: &str = "Monster Pack Size: ";
 pub const WAYSTONE_MAGIC_MONSTERS: &str = "Magic Monsters: ";
 pub const WAYSTONE_RARE_MONSTERS: &str = "Rare Monsters: ";
 pub const WAYSTONE_DROP_CHANCE: &str = "Waystone Drop Chance: ";
 pub const WAYSTONE_RARITY: &str = "Item Rarity: ";
 pub const WAYSTONE_GOLD: &str = "Gold Found: ";
+pub const WAYSTONE_MONSTER_RARITY: &str = "Monster Rarity: ";
+pub const WAYSTONE_EFFECTIVENESS: &str = "Monster Effectiveness: ";
 
 // ---------------------------------------------------------------------------
 // Whole line flags
