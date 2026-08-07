@@ -80,6 +80,54 @@ pub fn max_modifiers_of_type(category: Option<ItemCategory>, rarity: Option<Item
     }
 }
 
+/// The stat that widens an item's prefix budget.
+pub const PREFIX_ALLOWED: &str = "# Prefix Modifier allowed";
+
+/// The stat that widens an item's suffix budget.
+pub const SUFFIX_ALLOWED: &str = "# Suffix Modifier allowed";
+
+/// How many prefixes and suffixes an item can hold.
+///
+/// Ported from `itemMaxModifiersBySlot`.
+///
+/// # Why the base count is not the answer
+///
+/// A rare holds three of each, until something says otherwise. A crafted
+/// `+1 Prefix Modifier allowed` makes room for a fourth, and a
+/// `-1 Prefix Modifier allowed` takes one away.
+///
+/// Without this the base count was used on its own, so an item with a fourth
+/// prefix already crafted in read as over full and one with room to craft read
+/// as finished. Both send the wrong open slot filter, which is the one thing
+/// this whole module exists to get right.
+///
+/// A negative budget is clamped to zero rather than left negative, because a
+/// count below nothing has no meaning and would make every comparison against
+/// it read as full.
+pub fn max_modifiers_by_slot(
+    category: Option<ItemCategory>,
+    rarity: Option<ItemRarity>,
+    stats: &[(String, f64)],
+) -> SlotCount {
+    let base = max_modifiers_of_type(category, rarity) as f64;
+
+    let mut prefixes = base;
+    let mut suffixes = base;
+
+    for (reference, roll) in stats {
+        if reference == PREFIX_ALLOWED {
+            prefixes += roll;
+        } else if reference == SUFFIX_ALLOWED {
+            suffixes += roll;
+        }
+    }
+
+    SlotCount {
+        prefixes: prefixes.max(0.0) as usize,
+        suffixes: suffixes.max(0.0) as usize,
+    }
+}
+
 /// Which slot an item has open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmptySlot {
@@ -120,10 +168,26 @@ pub fn empty_slot(item: &ParsedItem) -> Option<EmptySlot> {
         return None;
     }
 
-    let max = max_modifiers_of_type(item.category, item.rarity);
+    // The item's own modifiers can widen its budget. Using the base count
+    // alone reports a craftable item as finished and a widened one as over
+    // full.
+    let allowances: Vec<(String, f64)> = item
+        .modifiers
+        .iter()
+        .flat_map(|m| &m.stats)
+        .filter(|s| s.reference == PREFIX_ALLOWED || s.reference == SUFFIX_ALLOWED)
+        .map(|s| {
+            (
+                s.reference.clone(),
+                s.roll.map(|r| r.value).unwrap_or_default(),
+            )
+        })
+        .collect();
 
-    let prefix_open = counts.prefixes < max;
-    let suffix_open = counts.suffixes < max;
+    let max = max_modifiers_by_slot(item.category, item.rarity, &allowances);
+
+    let prefix_open = counts.prefixes < max.prefixes;
+    let suffix_open = counts.suffixes < max.suffixes;
 
     match (prefix_open, suffix_open) {
         (true, true) => Some(EmptySlot::Either),
@@ -210,6 +274,94 @@ pub fn flask_enchant_is_useful(references: &[String]) -> bool {
 /// and not of the item, so a buyer searching for the item does not want it.
 pub fn is_hidden_by_default(kind: ModifierType) -> bool {
     matches!(kind, ModifierType::Augment | ModifierType::AddedAugment)
+}
+
+#[cfg(test)]
+mod slot_budget_tests {
+    use super::*;
+    use crate::controller::parse::shared::modifiers::ParsedModifier;
+    use crate::types::modifier::{Generation, ModifierInfo};
+    use crate::types::stat::{ParsedStat, StatRoll};
+
+    fn modifier(generation: Generation, reference: &str, roll: Option<f64>) -> ParsedModifier {
+        ParsedModifier {
+            info: ModifierInfo {
+                kind: Some(ModifierType::Explicit),
+                generation: Some(generation),
+                ..ModifierInfo::default()
+            },
+            stats: vec![ParsedStat {
+                reference: reference.into(),
+                matched: reference.into(),
+                roll: roll.map(|value| StatRoll {
+                    value,
+                    min: value,
+                    max: value,
+                    ..StatRoll::default()
+                }),
+            }],
+        }
+    }
+
+    fn rare_with(modifiers: Vec<ParsedModifier>) -> ParsedItem {
+        ParsedItem {
+            rarity: Some(ItemRarity::Rare),
+            category: Some(ItemCategory::Ring),
+            modifiers,
+            // An item that cannot be crafted has no slot to open, so
+            // empty_slot refuses it before it counts anything.
+            info: crate::types::item::BaseInfo {
+                craftable: true,
+                ..crate::types::item::BaseInfo::default()
+            },
+            ..ParsedItem::default()
+        }
+    }
+
+    #[test]
+    fn a_rare_with_three_prefixes_has_no_prefix_room() {
+        let item = rare_with(vec![
+            modifier(Generation::Prefix, "# to maximum Life", Some(79.0)),
+            modifier(Generation::Prefix, "# to maximum Mana", Some(61.0)),
+            modifier(Generation::Prefix, "# to Armour", Some(50.0)),
+            modifier(Generation::Suffix, "#% to Fire Resistance", Some(45.0)),
+        ]);
+
+        assert_eq!(empty_slot(&item), Some(EmptySlot::Suffix));
+    }
+
+    #[test]
+    fn a_crafted_prefix_allowance_opens_a_fourth_slot() {
+        // The whole point. Three prefixes and a "+1 Prefix Modifier allowed"
+        // means the item still has room, and the base count alone reports it
+        // as finished.
+        let item = rare_with(vec![
+            modifier(Generation::Prefix, "# to maximum Life", Some(79.0)),
+            modifier(Generation::Prefix, "# to maximum Mana", Some(61.0)),
+            modifier(Generation::Prefix, "# to Armour", Some(50.0)),
+            modifier(Generation::Suffix, PREFIX_ALLOWED, Some(1.0)),
+            modifier(Generation::Suffix, "#% to Fire Resistance", Some(45.0)),
+            modifier(Generation::Suffix, "#% to Cold Resistance", Some(45.0)),
+        ]);
+
+        assert_eq!(empty_slot(&item), Some(EmptySlot::Prefix));
+    }
+
+    #[test]
+    fn a_negative_allowance_closes_a_slot_that_looked_open() {
+        // Two prefixes on a rare normally leaves room. A minus one takes it
+        // away, and offering the filter would find items this one is not
+        // comparable to.
+        let item = rare_with(vec![
+            modifier(Generation::Prefix, "# to maximum Life", Some(79.0)),
+            modifier(Generation::Prefix, PREFIX_ALLOWED, Some(-1.0)),
+            modifier(Generation::Suffix, "#% to Fire Resistance", Some(45.0)),
+            modifier(Generation::Suffix, "#% to Cold Resistance", Some(45.0)),
+            modifier(Generation::Suffix, "#% to Lightning Resistance", Some(45.0)),
+        ]);
+
+        assert_eq!(empty_slot(&item), None);
+    }
 }
 
 #[cfg(test)]
