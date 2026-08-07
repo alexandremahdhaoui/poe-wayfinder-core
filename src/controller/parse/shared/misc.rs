@@ -198,7 +198,16 @@ pub fn parse_spirit(section: &[String], state: &mut ParserState) -> ParseOutcome
         return ParseOutcome::ParserSkipped;
     }
 
-    if section.iter().any(|l| l.starts_with(cs::BASE_SPIRIT)) {
+    for line in section {
+        let Some(rest) = line.strip_prefix(cs::BASE_SPIRIT) else {
+            continue;
+        };
+
+        // Read, not just consumed. This stage used to claim the section and
+        // throw the number away, and it runs before parse_weapon, so nothing
+        // else ever saw it. Spirit is the number a sceptre is bought for.
+        state.item.weapon.spirit = leading_int(rest).map(|v| v as f64);
+
         return ParseOutcome::SectionParsed;
     }
 
@@ -423,6 +432,43 @@ mod tests {
             ParseOutcome::SectionParsed
         );
         assert_eq!(s.item.quality, Some(20));
+    }
+
+    #[test]
+    fn a_sceptre_reports_its_spirit() {
+        // The stage used to claim the section and drop the number. It runs
+        // before parse_weapon, so nothing else ever saw the line, and spirit
+        // is what a sceptre is bought for.
+        let mut s = ParserState::default();
+        s.item.category = Some(ItemCategory::Sceptre);
+
+        let got = parse_spirit(&sec(&["Spirit: 152 (augmented)"]), &mut s);
+
+        assert_eq!(got, ParseOutcome::SectionParsed);
+        assert_eq!(s.item.weapon.spirit, Some(152.0));
+    }
+
+    #[test]
+    fn a_sceptre_section_with_no_spirit_line_is_left_alone() {
+        // Consuming it would eat whatever the section really held.
+        let mut s = ParserState::default();
+        s.item.category = Some(ItemCategory::Sceptre);
+
+        let got = parse_spirit(&sec(&["Item Level: 79"]), &mut s);
+
+        assert_eq!(got, ParseOutcome::SectionSkipped);
+        assert_eq!(s.item.weapon.spirit, None);
+    }
+
+    #[test]
+    fn a_non_sceptre_skips_the_spirit_stage() {
+        let mut s = ParserState::default();
+        s.item.category = Some(ItemCategory::Bow);
+
+        assert_eq!(
+            parse_spirit(&sec(&["Spirit: 152"]), &mut s),
+            ParseOutcome::ParserSkipped
+        );
     }
 
     #[test]

@@ -194,20 +194,32 @@ pub fn apply_elemental_added(state: &mut ParserState<'_>) -> Result<(), ParseErr
         }
     }
 
-    add_into(&mut state.item.weapon.fire, fire);
-    add_into(&mut state.item.weapon.cold, cold);
-    add_into(&mut state.item.weapon.lightning, lightning);
+    fill_if_absent(&mut state.item.weapon.fire, fire);
+    fill_if_absent(&mut state.item.weapon.cold, cold);
+    fill_if_absent(&mut state.item.weapon.lightning, lightning);
 
     Ok(())
 }
 
-/// Add into an optional total, leaving it absent when there is nothing to add.
-fn add_into(slot: &mut Option<f64>, value: f64) {
-    if value == 0.0 {
+/// Fill a total the item did not print, and leave one it did alone.
+///
+/// # Why not add
+///
+/// This used to add. The game prints the damage an element deals **after** its
+/// modifiers, so a weapon that prints `Lightning Damage: 1-50` and carries
+/// `Adds 1 to 50 Lightning Damage` was counted twice and came out at 51
+/// against the reference's 25.5. Its elemental damage per second read double,
+/// which is most of what a weapon is priced on.
+///
+/// The pass is still needed. A weapon that prints only a combined
+/// `Elemental Damage:` line gives no per element split at all, and the
+/// modifiers are the only place that split exists.
+fn fill_if_absent(slot: &mut Option<f64>, value: f64) {
+    if value == 0.0 || slot.is_some() {
         return;
     }
 
-    *slot = Some(slot.unwrap_or(0.0) + value);
+    *slot = Some(value);
 }
 
 #[cfg(test)]
@@ -554,7 +566,14 @@ mod tests {
     }
 
     #[test]
-    fn a_breakdown_the_weapon_line_already_gave_is_added_to() {
+    fn a_breakdown_the_weapon_line_already_gave_is_left_alone() {
+        // This used to assert the two were added, and the reference says
+        // otherwise: its MagicItem prints `Lightning Damage: 1-50` and carries
+        // `Adds 1 to 50 Lightning Damage`, and expects 25.5 rather than 51.
+        //
+        // The game prints an element's damage after its modifiers, so adding
+        // the modifier again doubles it, and elemental damage per second is
+        // most of what a weapon is priced on.
         let mut s = state_for(ItemCategory::Bow, "Spine Bow");
         s.item.weapon = WeaponStats {
             elemental: Some(100.0),
@@ -567,7 +586,26 @@ mod tests {
 
         apply_elemental_added(&mut s).unwrap();
 
-        assert_eq!(s.item.weapon.fire, Some(40.0));
+        assert_eq!(s.item.weapon.fire, Some(10.0));
+    }
+
+    #[test]
+    fn an_element_the_weapon_line_never_split_out_is_filled_in() {
+        // The pass is still needed. A weapon printing only a combined
+        // `Elemental Damage:` line gives no per element split, and the
+        // modifiers are the only place that split exists.
+        let mut s = state_for(ItemCategory::Bow, "Spine Bow");
+        s.item.weapon = WeaponStats {
+            elemental: Some(100.0),
+            ..WeaponStats::default()
+        };
+        s.item
+            .modifiers
+            .push(added("Adds # to # Fire Damage", 30.0));
+
+        apply_elemental_added(&mut s).unwrap();
+
+        assert_eq!(s.item.weapon.fire, Some(30.0));
     }
 
     #[test]
