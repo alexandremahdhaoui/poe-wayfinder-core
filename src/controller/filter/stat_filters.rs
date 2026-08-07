@@ -188,6 +188,9 @@ pub fn build_stat_filters(
         filters.push(filter);
     }
 
+    // The explicit modifiers, kept for the fractured pass below.
+    let mut explicit_matches: Vec<(String, StatFilter)> = Vec::new();
+
     for total in totals {
         // The lookup is by the literal form the game printed, so the matched
         // text is carried back from the modifier that produced the reference.
@@ -198,6 +201,10 @@ pub fn build_stat_filters(
         let Some(built) = build_one(&matched, total.roll, total.kind, data, options) else {
             continue;
         };
+
+        if total.kind == ModifierType::Explicit {
+            explicit_matches.push((matched.clone(), built.filter.clone()));
+        }
 
         match built.alternates.is_empty() {
             true => filters.push(built.filter),
@@ -222,6 +229,15 @@ pub fn build_stat_filters(
         }
     }
 
+    if let Some(item) = item {
+        filters.extend(missing_fractured_filters(
+            item,
+            modifiers,
+            &explicit_matches,
+            data,
+        ));
+    }
+
     StatFilters {
         and: (!filters.is_empty()).then(|| StatGroup {
             filters,
@@ -229,6 +245,69 @@ pub fn build_stat_filters(
         }),
         counts,
     }
+}
+
+/// A fractured copy of every explicit filter, when the item says it is
+/// fractured but no modifier admits to being the fractured one.
+///
+/// Ported from `missing-fractured-rules.ts`.
+///
+/// # The case this exists for
+///
+/// An item can print `Fractured Item` while none of its modifiers carries the
+/// fractured marker. That happens whenever Advanced Item Description is off,
+/// which is the default. We know one of the explicits is fractured and we have
+/// no way to tell which.
+///
+/// So every explicit is offered under its fractured trade id as well. The
+/// trade site matches whichever one really is fractured, and the buyer gets
+/// comparable items instead of none.
+///
+/// A fractured modifier cannot be changed by any craft, which is most of what
+/// a fractured item is worth. Without this a fractured item copied the normal
+/// way carried no fractured filter at all.
+///
+/// The copies are disabled, like the explicit filters they came from. Turning
+/// them all on would demand every modifier be fractured, and only one is.
+fn missing_fractured_filters(
+    item: &crate::types::item::ParsedItem,
+    modifiers: &[ParsedModifier],
+    explicit_matches: &[(String, StatFilter)],
+    data: &dyn StatLookup,
+) -> Vec<StatFilter> {
+    if !item.is_fractured {
+        return Vec::new();
+    }
+
+    // A modifier already marked fractured means the game told us which one,
+    // and guessing on top of that would ask for two fractured modifiers.
+    if modifiers
+        .iter()
+        .any(|m| m.info.kind == Some(ModifierType::Fractured))
+    {
+        return Vec::new();
+    }
+
+    explicit_matches
+        .iter()
+        .filter_map(|(matched, filter)| {
+            let hit = data.stat_by_matcher(matched)?;
+
+            let id = hit
+                .stat
+                .trade
+                .ids_for(ModifierType::Fractured)
+                .and_then(|ids| ids.first())?;
+
+            let mut copy = filter.clone();
+            copy.id = id.clone();
+            // Never enabled by default. Only one of these is really the
+            // fractured modifier and requiring all of them matches nothing.
+            copy.disabled = true;
+
+            Some(copy)
+        })
+        .collect()
 }
 
 /// One filter per influence the item carries.
@@ -705,6 +784,180 @@ mod tests {
         );
 
         assert!(group.is_none());
+    }
+
+    // -----------------------------------------------------------------
+    // The missing fractured rule, from missing-fracture-rules.test.ts
+    //
+    // Three of the reference's four cases are vacuous: they compare the array
+    // against a copy taken after the call, which is always equal. Only the
+    // fourth asserts anything, so the rest are written here properly.
+    // -----------------------------------------------------------------
+
+    fn fracture_table() -> FakeStats {
+        let mut life = TradeInfo::default();
+        life.ids
+            .insert("explicit".into(), vec!["explicit.stat_life".into()]);
+        life.ids
+            .insert("fractured".into(), vec!["fractured.stat_life".into()]);
+
+        let mut res = TradeInfo::default();
+        res.ids
+            .insert("explicit".into(), vec!["explicit.stat_res".into()]);
+        res.ids
+            .insert("fractured".into(), vec!["fractured.stat_res".into()]);
+
+        FakeStats {
+            stats: vec![
+                stat_with("# to maximum Life", StatBetter::PositiveRoll, life),
+                stat_with("#% to Fire Resistance", StatBetter::PositiveRoll, res),
+            ],
+        }
+    }
+
+    fn two_explicits() -> Vec<ParsedModifier> {
+        vec![
+            modifier(ModifierType::Explicit, "# to maximum Life", roll(79.0)),
+            modifier(ModifierType::Explicit, "#% to Fire Resistance", roll(45.0)),
+        ]
+    }
+
+    fn fractured_item(is_fractured: bool) -> crate::types::item::ParsedItem {
+        crate::types::item::ParsedItem {
+            is_fractured,
+            ..crate::types::item::ParsedItem::default()
+        }
+    }
+
+    #[test]
+    fn a_fractured_item_offers_every_explicit_as_fractured_too() {
+        // The reference's only real case: two explicits become two more
+        // filters tagged fractured, four in total.
+        //
+        // The item says "Fractured Item" and no modifier admits to being the
+        // fractured one, which is what happens with Advanced Item Description
+        // off. One of them is; we cannot tell which, so all are offered.
+        let item = fractured_item(true);
+
+        let group = build_stat_group_for(
+            &two_explicits(),
+            Some(&item),
+            &fracture_table(),
+            StatFilterOptions::default(),
+        )
+        .unwrap();
+
+        let fractured: Vec<&StatFilter> = group
+            .filters
+            .iter()
+            .filter(|f| f.id.starts_with("fractured."))
+            .collect();
+
+        assert_eq!(fractured.len(), 2);
+        assert_eq!(group.filters.len(), 4);
+    }
+
+    #[test]
+    fn an_unfractured_item_offers_no_fractured_filters() {
+        // Offering them would search a market this item is not in. Fractured
+        // items are worth more, so the price would read high.
+        let item = fractured_item(false);
+
+        let group = build_stat_group_for(
+            &two_explicits(),
+            Some(&item),
+            &fracture_table(),
+            StatFilterOptions::default(),
+        )
+        .unwrap();
+
+        assert!(!group.filters.iter().any(|f| f.id.starts_with("fractured.")));
+    }
+
+    #[test]
+    fn an_item_whose_fractured_modifier_is_marked_gets_no_guesses() {
+        // The game already told us which one. Adding guesses on top would ask
+        // for two fractured modifiers on an item that has one.
+        let item = fractured_item(true);
+
+        let mut modifiers = two_explicits();
+        modifiers.push(modifier(
+            ModifierType::Fractured,
+            "# to maximum Life",
+            roll(79.0),
+        ));
+
+        let group = build_stat_group_for(
+            &modifiers,
+            Some(&item),
+            &fracture_table(),
+            StatFilterOptions::default(),
+        )
+        .unwrap();
+
+        let guessed = group
+            .filters
+            .iter()
+            .filter(|f| f.id.starts_with("fractured."))
+            .count();
+
+        assert!(guessed <= 1, "{guessed} fractured filters were guessed");
+    }
+
+    #[test]
+    fn a_guessed_fractured_filter_starts_off() {
+        // Only one of them is really fractured. Enabling them all would
+        // require every modifier to be fractured and match nothing.
+        let item = fractured_item(true);
+
+        let group = build_stat_group_for(
+            &two_explicits(),
+            Some(&item),
+            &fracture_table(),
+            StatFilterOptions::default(),
+        )
+        .unwrap();
+
+        for filter in group
+            .filters
+            .iter()
+            .filter(|f| f.id.starts_with("fractured."))
+        {
+            assert!(filter.disabled, "{} is on by default", filter.id);
+        }
+    }
+
+    #[test]
+    fn a_stat_with_no_fractured_id_is_not_guessed_at() {
+        // Sending an id the trade site does not know fails the whole query.
+        let mut trade = TradeInfo::default();
+        trade
+            .ids
+            .insert("explicit".into(), vec!["explicit.stat_life".into()]);
+
+        let table = FakeStats {
+            stats: vec![stat_with(
+                "# to maximum Life",
+                StatBetter::PositiveRoll,
+                trade,
+            )],
+        };
+
+        let item = fractured_item(true);
+
+        let group = build_stat_group_for(
+            &[modifier(
+                ModifierType::Explicit,
+                "# to maximum Life",
+                roll(79.0),
+            )],
+            Some(&item),
+            &table,
+            StatFilterOptions::default(),
+        )
+        .unwrap();
+
+        assert!(!group.filters.iter().any(|f| f.id.starts_with("fractured.")));
     }
 
     #[test]
