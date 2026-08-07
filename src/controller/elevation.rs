@@ -7,11 +7,18 @@
 //! hotkey does nothing, forever, and the log stays silent because no press
 //! ever arrives.
 //!
-//! The cause is Windows, not the tool. User Interface Privilege Isolation
-//! stops a process receiving input aimed at a window belonging to a
-//! higher privilege process. If Path of Exile runs as administrator and the
-//! overlay does not, `RegisterHotKey` succeeds and `WM_HOTKEY` is never
-//! delivered while the game has focus.
+//! The remedy is well attested even where the exact mechanism is not.
+//!
+//! Windows isolates processes by privilege, and a tool running below the
+//! window that has focus can find its input silently withheld. What is
+//! documented beyond doubt is the fix: Awakened PoE Trade hits the same
+//! symptom and its answer is to run the tool at the same privilege as the
+//! game.
+//!
+//! What is **not** claimed here is the precise kernel rule. Microsoft's own
+//! notes on UIPI are about hooks rather than hotkeys, and at least one
+//! reference states that hotkey combinations are not blocked. So this reports
+//! a mismatch and the remedy, and does not assert a cause it cannot prove.
 //!
 //! Steam is the usual reason. After Steam updates itself it keeps running
 //! elevated, and every game it launches inherits that.
@@ -78,10 +85,12 @@ pub fn advice(outlook: HotkeyOutlook) -> Option<&'static str> {
         HotkeyOutlook::Fine => None,
 
         HotkeyOutlook::BlockedByGame => Some(
-            "The game is running as administrator and this is not, so Windows will not deliver \
-             the hotkey. Close this, right click it and choose Run as administrator. Steam is \
-             the usual cause: once it updates itself it stays elevated and every game it \
-             launches inherits that.",
+            "The game runs as administrator and this does not. That mismatch is the usual \
+             reason a price check hotkey registers and then never fires. Close this, right \
+             click it and choose Run as administrator. Steam is the usual cause: once it \
+             updates itself it stays elevated and every game it launches inherits that. \
+             To check it is the cause, press the hotkey with the game minimised: if it works \
+             there and not in game, this is why.",
         ),
 
         HotkeyOutlook::OverlayElevated => Some(
@@ -91,8 +100,8 @@ pub fn advice(outlook: HotkeyOutlook) -> Option<&'static str> {
 
         HotkeyOutlook::Unknown => Some(
             "Could not tell whether the game runs as administrator. If the hotkey does nothing, \
-             try running this as administrator: Windows will not deliver a hotkey to a program \
-             less privileged than the window with focus.",
+             try running this as administrator, and try pressing it with the game minimised to \
+             see whether the game is what stops it.",
         ),
     }
 }
@@ -128,8 +137,9 @@ mod tests {
 
     #[test]
     fn an_elevated_game_blocks_an_ordinary_overlay() {
-        // The whole reason this module exists. Windows will not deliver the
-        // hotkey across the privilege boundary in this direction.
+        // The whole reason this module exists. It is the mismatch the tool
+        // community reports for this exact symptom, and the remedy is well
+        // attested even though the precise kernel rule is not.
         assert_eq!(
             hotkey_outlook(Elevation::Normal, Elevation::Elevated),
             HotkeyOutlook::BlockedByGame
@@ -138,7 +148,7 @@ mod tests {
 
     #[test]
     fn an_elevated_overlay_over_an_ordinary_game_still_works() {
-        // The restriction is one way. Higher privilege can reach lower.
+        // Whatever the restriction is, it bites in one direction only.
         assert_eq!(
             hotkey_outlook(Elevation::Elevated, Elevation::Normal),
             HotkeyOutlook::OverlayElevated
