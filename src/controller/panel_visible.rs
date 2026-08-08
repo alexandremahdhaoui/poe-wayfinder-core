@@ -37,7 +37,7 @@ pub enum Visibility {
     BehindGame,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Measured {
     pub window: Rect,
     pub desktop: Rect,
