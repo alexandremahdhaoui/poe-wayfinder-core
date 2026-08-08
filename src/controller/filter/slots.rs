@@ -1,27 +1,8 @@
-//! Modifier slot counting and the per category filter rules.
-//!
-//! Ported from `explicitModifierCount`, `itemBaseMaxModifiersOfType`,
-//! `itemMaxModifiersBySlot`, `showHasEmptyModifier`, `applyClusterJewelRules`,
-//! `applyFlaskRules`, `hideAllAugments` and `likelyFinishedItem` in
-//! `create-stat-filters.ts` and `common.ts`.
-//!
-//! # Why an empty slot is worth searching for
-//!
-//! A rare with five modifiers and one open prefix is worth more than the same
-//! rare with six, because the buyer can craft into the gap. The trade site has
-//! a filter for it and it is invisible from the item text alone: you have to
-//! count what is there and know what the base allows.
-
 use crate::controller::parse::shared::modifiers::ParsedModifier;
 use crate::types::category::ItemCategory;
 use crate::types::item::{ItemRarity, ParsedItem};
 use crate::types::modifier::{Generation, ModifierType};
 
-/// How many prefixes and suffixes an item carries.
-///
-/// Ported from `explicitModifierCount`. Only the modifiers the trade site
-/// counts as explicit. A rune or an implicit occupies no prefix or suffix
-/// slot, so counting it would report a full item as full when it is not.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SlotCount {
     pub prefixes: usize,
@@ -29,13 +10,11 @@ pub struct SlotCount {
 }
 
 impl SlotCount {
-    /// Prefixes plus suffixes.
     pub fn total(self) -> usize {
         self.prefixes + self.suffixes
     }
 }
 
-/// Count the explicit modifiers by generation.
 pub fn explicit_modifier_count(modifiers: &[ParsedModifier]) -> SlotCount {
     use crate::controller::aggregate::is_explicit_family;
 
@@ -49,9 +28,6 @@ pub fn explicit_modifier_count(modifiers: &[ParsedModifier]) -> SlotCount {
         match modifier.info.generation {
             Some(Generation::Prefix) => out.prefixes += 1,
             Some(Generation::Suffix) => out.suffixes += 1,
-            // Without Advanced Item Description the game prints no generation,
-            // so the modifier cannot be attributed to a slot. Guessing would
-            // report an open slot that is not there.
             _ => {}
         }
     }
@@ -59,10 +35,6 @@ pub fn explicit_modifier_count(modifiers: &[ParsedModifier]) -> SlotCount {
     out
 }
 
-/// How many modifiers of each kind a base can carry.
-///
-/// Ported from `itemBaseMaxModifiersOfType`. A jewel takes two of each and
-/// most other rares take three.
 pub fn max_modifiers_of_type(category: Option<ItemCategory>, rarity: Option<ItemRarity>) -> usize {
     match rarity {
         Some(ItemRarity::Normal) => 0,
@@ -80,30 +52,10 @@ pub fn max_modifiers_of_type(category: Option<ItemCategory>, rarity: Option<Item
     }
 }
 
-/// The stat that widens an item's prefix budget.
 pub const PREFIX_ALLOWED: &str = "# Prefix Modifier allowed";
 
-/// The stat that widens an item's suffix budget.
 pub const SUFFIX_ALLOWED: &str = "# Suffix Modifier allowed";
 
-/// How many prefixes and suffixes an item can hold.
-///
-/// Ported from `itemMaxModifiersBySlot`.
-///
-/// # Why the base count is not the answer
-///
-/// A rare holds three of each, until something says otherwise. A crafted
-/// `+1 Prefix Modifier allowed` makes room for a fourth, and a
-/// `-1 Prefix Modifier allowed` takes one away.
-///
-/// Without this the base count was used on its own, so an item with a fourth
-/// prefix already crafted in read as over full and one with room to craft read
-/// as finished. Both send the wrong open slot filter, which is the one thing
-/// this whole module exists to get right.
-///
-/// A negative budget is clamped to zero rather than left negative, because a
-/// count below nothing has no meaning and would make every comparison against
-/// it read as full.
 pub fn max_modifiers_by_slot(
     category: Option<ItemCategory>,
     rarity: Option<ItemRarity>,
@@ -128,26 +80,13 @@ pub fn max_modifiers_by_slot(
     }
 }
 
-/// Which slot an item has open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmptySlot {
     Prefix,
     Suffix,
-    /// One of each, or the caller does not care which.
     Either,
 }
 
-/// Whether the item has an open slot worth searching for.
-///
-/// Ported from `showHasEmptyModifier`.
-///
-/// Only a rare or a magic item that can still be crafted. A unique has no
-/// slots to open, a normal item has no modifiers, and a corrupted item cannot
-/// use the space.
-///
-/// Returns None when the counts are unknown, which is what happens without
-/// Advanced Item Description. Reporting an open slot the item may not have
-/// would send the buyer a filter that finds the wrong items.
 pub fn empty_slot(item: &ParsedItem) -> Option<EmptySlot> {
     if !item.is_modifiable() || item.category == Some(ItemCategory::Map) {
         return None;
@@ -162,15 +101,10 @@ pub fn empty_slot(item: &ParsedItem) -> Option<EmptySlot> {
 
     let counts = explicit_modifier_count(&item.modifiers);
 
-    // Nothing attributed to a slot means the game printed no generations, so
-    // the count says nothing.
     if counts.total() == 0 {
         return None;
     }
 
-    // The item's own modifiers can widen its budget. Using the base count
-    // alone reports a craftable item as finished and a widened one as over
-    // full.
     let allowances: Vec<(String, f64)> = item
         .modifiers
         .iter()
@@ -197,10 +131,6 @@ pub fn empty_slot(item: &ParsedItem) -> Option<EmptySlot> {
     }
 }
 
-/// Whether an item is finished and will not be crafted further.
-///
-/// Ported from `likelyFinishedItem`. A rare with every slot full is what a
-/// buyer uses as it is, so its rolls are pinned rather than given room.
 pub fn likely_finished(item: &ParsedItem) -> bool {
     if !item.is_modifiable() {
         return true;
@@ -217,30 +147,14 @@ pub fn likely_finished(item: &ParsedItem) -> bool {
     counts.prefixes >= max && counts.suffixes >= max
 }
 
-/// The bound a cluster jewel's passive count deserves.
-///
-/// Ported from `applyClusterJewelRules`.
-///
-/// Cluster jewels are priced by how many passives they add, and the good
-/// numbers are not a range. Four is bought as "four or five". Five is bought
-/// as exactly five. Three, six, ten, eleven and twelve are bought as "at
-/// least", because those are the breakpoints notables sit on.
-///
-/// Two, eight and nine are bought as "at most", because past them the jewel
-/// costs points without adding a notable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PassiveBound {
-    /// Exactly this many.
     Exact,
-    /// This many or more.
     AtLeast,
-    /// This many or fewer.
     AtMost,
-    /// Between this and the given ceiling.
     UpTo(u32),
 }
 
-/// Which bound a passive count deserves.
 pub fn passive_bound(count: u32) -> PassiveBound {
     match count {
         4 => PassiveBound::UpTo(5),
@@ -250,28 +164,16 @@ pub fn passive_bound(count: u32) -> PassiveBound {
     }
 }
 
-/// Whether a stat is a cluster jewel's socket count.
-///
-/// It is fixed by the base and filtering on it narrows nothing.
 pub fn is_cluster_socket_stat(reference: &str) -> bool {
     reference == "# Added Passive Skills are Jewel Sockets"
 }
 
-/// Whether a flask enchant is worth showing.
-///
-/// Ported from `applyFlaskRules`. A harvest or instilling enchant is on almost
-/// every flask and filtering on it returns nothing useful. An enkindling
-/// orb's line is the exception, because it changes what the flask does.
 pub fn flask_enchant_is_useful(references: &[String]) -> bool {
     references
         .iter()
         .any(|r| r == "Gains no Charges during Flask Effect")
 }
 
-/// Whether a modifier type should be hidden by default.
-///
-/// Ported from `hideAllAugments`. A rune's effect is a property of the rune
-/// and not of the item, so a buyer searching for the item does not want it.
 pub fn is_hidden_by_default(kind: ModifierType) -> bool {
     matches!(kind, ModifierType::Augment | ModifierType::AddedAugment)
 }
@@ -308,8 +210,6 @@ mod slot_budget_tests {
             rarity: Some(ItemRarity::Rare),
             category: Some(ItemCategory::Ring),
             modifiers,
-            // An item that cannot be crafted has no slot to open, so
-            // empty_slot refuses it before it counts anything.
             info: crate::types::item::BaseInfo {
                 craftable: true,
                 ..crate::types::item::BaseInfo::default()
@@ -332,9 +232,6 @@ mod slot_budget_tests {
 
     #[test]
     fn a_crafted_prefix_allowance_opens_a_fourth_slot() {
-        // The whole point. Three prefixes and a "+1 Prefix Modifier allowed"
-        // means the item still has room, and the base count alone reports it
-        // as finished.
         let item = rare_with(vec![
             modifier(Generation::Prefix, "# to maximum Life", Some(79.0)),
             modifier(Generation::Prefix, "# to maximum Mana", Some(61.0)),
@@ -349,9 +246,6 @@ mod slot_budget_tests {
 
     #[test]
     fn a_negative_allowance_closes_a_slot_that_looked_open() {
-        // Two prefixes on a rare normally leaves room. A minus one takes it
-        // away, and offering the filter would find items this one is not
-        // comparable to.
         let item = rare_with(vec![
             modifier(Generation::Prefix, "# to maximum Life", Some(79.0)),
             modifier(Generation::Prefix, PREFIX_ALLOWED, Some(-1.0)),
@@ -409,7 +303,6 @@ mod tests {
 
     #[test]
     fn a_crafted_modifier_counts_toward_the_slots() {
-        // The trade site indexes it as explicit and it occupies a slot.
         let got =
             explicit_modifier_count(&[modifier(ModifierType::Crafted, Some(Generation::Prefix))]);
 
@@ -418,7 +311,6 @@ mod tests {
 
     #[test]
     fn an_implicit_or_a_rune_occupies_no_slot() {
-        // Counting one would report a full item as full when it is not.
         let got = explicit_modifier_count(&[
             modifier(ModifierType::Implicit, Some(Generation::Prefix)),
             modifier(ModifierType::Augment, Some(Generation::Suffix)),
@@ -429,8 +321,6 @@ mod tests {
 
     #[test]
     fn a_modifier_with_no_generation_is_not_attributed() {
-        // Without Advanced Item Description the game prints none, and guessing
-        // would report an open slot that is not there.
         let got = explicit_modifier_count(&[modifier(ModifierType::Explicit, None)]);
 
         assert_eq!(got.total(), 0);
@@ -509,7 +399,6 @@ mod tests {
 
     #[test]
     fn a_corrupted_item_reports_no_open_slot() {
-        // It cannot use the space, so the filter would be a lie.
         let item = ParsedItem {
             is_corrupted: true,
             ..rare(vec![modifier(
@@ -549,8 +438,6 @@ mod tests {
 
     #[test]
     fn an_item_with_no_attributed_modifiers_reports_nothing() {
-        // Without Advanced Item Description the count says nothing, and a
-        // filter built on it would find the wrong items.
         assert_eq!(
             empty_slot(&rare(vec![modifier(ModifierType::Explicit, None)])),
             None
@@ -559,8 +446,6 @@ mod tests {
 
     #[test]
     fn a_full_rare_is_finished() {
-        // A buyer uses it as it is, so its rolls are pinned rather than given
-        // room.
         let mut modifiers = Vec::new();
 
         for _ in 0..3 {
@@ -594,8 +479,6 @@ mod tests {
 
     #[test]
     fn each_cluster_passive_count_gets_the_bound_the_market_uses() {
-        // The good numbers are not a range. These are the breakpoints notables
-        // sit on.
         assert_eq!(passive_bound(4), PassiveBound::UpTo(5));
         assert_eq!(passive_bound(5), PassiveBound::Exact);
 
@@ -610,7 +493,6 @@ mod tests {
 
     #[test]
     fn a_cluster_socket_stat_is_recognised() {
-        // It is fixed by the base and filtering on it narrows nothing.
         assert!(is_cluster_socket_stat(
             "# Added Passive Skills are Jewel Sockets"
         ));
@@ -619,7 +501,6 @@ mod tests {
 
     #[test]
     fn a_flask_enchant_is_only_useful_alongside_an_enkindling_line() {
-        // Harvest and instilling enchants are on almost every flask.
         assert!(!flask_enchant_is_useful(&["# to Life".to_string()]));
         assert!(flask_enchant_is_useful(&[
             "Gains no Charges during Flask Effect".to_string()
@@ -628,8 +509,6 @@ mod tests {
 
     #[test]
     fn a_rune_effect_is_hidden_by_default() {
-        // It belongs to the rune and not the item, so a buyer searching for
-        // the item does not want it.
         assert!(is_hidden_by_default(ModifierType::Augment));
         assert!(is_hidden_by_default(ModifierType::AddedAugment));
         assert!(!is_hidden_by_default(ModifierType::Explicit));

@@ -1,13 +1,3 @@
-//! Stages that read a small section or exist only to consume one.
-//!
-//! Ported from `parseStackSize`, `parseSockets`, `parsePriceNote`,
-//! `parseSentinelCharge`, `parseFlask`, `parseJewelery`, `parseCharmSlots`,
-//! `parseSpirit` and `parseTimelostRadius` in `renderer/src/parser/Parser.ts`.
-//!
-//! Several of these record nothing. Their whole job is to claim a section so
-//! the modifier stages never see it. A charm slot line read as a modifier
-//! becomes an unknown modifier and the UI then warns the user for no reason.
-
 use crate::controller::parse::shared::levels::parse_quality_nested;
 use crate::controller::parse::{ParseOutcome, ParserState};
 use crate::types::category::ItemCategory;
@@ -15,10 +5,6 @@ use crate::types::client_strings as cs;
 use crate::types::item::{GemSockets, ItemRarity, StackSize};
 use crate::util::number::{digits_only, leading_int};
 
-/// `Stack Size: 2,448/40`.
-///
-/// The separator inside the number varies with the client locale, so both
-/// halves are read digits only.
 pub fn parse_stack_size(section: &[String], state: &mut ParserState) -> ParseOutcome {
     let applies = state.item.rarity == Some(ItemRarity::Normal)
         || matches!(
@@ -54,10 +40,6 @@ pub fn parse_stack_size(section: &[String], state: &mut ParserState) -> ParseOut
     ParseOutcome::SectionParsed
 }
 
-/// `Sockets: G-G-G-R-R B` on a gem bearing base.
-///
-/// Only the link pattern matters for pricing, and only a five link or a six
-/// link is worth searching on.
 pub fn parse_sockets(section: &[String], state: &mut ParserState) -> ParseOutcome {
     if !state.item.category.is_some_and(ItemCategory::is_gem) {
         return ParseOutcome::SectionSkipped;
@@ -73,8 +55,6 @@ pub fn parse_sockets(section: &[String], state: &mut ParserState) -> ParseOutcom
 
     let raw = rest.trim_end();
 
-    // Every colour becomes a hash so only the shape is left. Spaces and
-    // hyphens are the shape.
     let shape: String = raw
         .chars()
         .map(|c| if c == ' ' || c == '-' { c } else { '#' })
@@ -95,9 +75,6 @@ pub fn parse_sockets(section: &[String], state: &mut ParserState) -> ParseOutcom
     ParseOutcome::SectionParsed
 }
 
-/// `Note: ~price 5 divine`.
-///
-/// Kept verbatim. The seller wrote it and any rewriting loses information.
 pub fn parse_price_note(section: &[String], state: &mut ParserState) -> ParseOutcome {
     for line in section {
         if let Some(rest) = line.strip_prefix(cs::PRICE_NOTE) {
@@ -110,7 +87,6 @@ pub fn parse_price_note(section: &[String], state: &mut ParserState) -> ParseOut
     ParseOutcome::SectionSkipped
 }
 
-/// `Charge: 42` on a sentinel.
 pub fn parse_sentinel_charge(section: &[String], state: &mut ParserState) -> ParseOutcome {
     if state.item.category != Some(ItemCategory::Sentinel) {
         return ParseOutcome::ParserSkipped;
@@ -129,10 +105,6 @@ pub fn parse_sentinel_charge(section: &[String], state: &mut ParserState) -> Par
     ParseOutcome::SectionParsed
 }
 
-/// A flask buff section.
-///
-/// Recorded value: none. It exists to stop `Currently has 12 Charges` and the
-/// buff text below it being read as modifiers.
 pub fn parse_flask(section: &[String], state: &mut ParserState) -> ParseOutcome {
     let has_charges = section
         .iter()
@@ -147,10 +119,6 @@ pub fn parse_flask(section: &[String], state: &mut ParserState) -> ParseOutcome 
     ParseOutcome::SectionParsed
 }
 
-/// A jewellery quality section.
-///
-/// Rings, amulets and belts print `Quality (Attack Modifiers): +20%` and
-/// similar. Matching on the bare word covers every variant.
 pub fn parse_jewelery(section: &[String], state: &mut ParserState) -> ParseOutcome {
     let applies = matches!(
         state.item.category,
@@ -161,9 +129,6 @@ pub fn parse_jewelery(section: &[String], state: &mut ParserState) -> ParseOutco
         return ParseOutcome::ParserSkipped;
     }
 
-    // The reference slices the quality prefix up to its colon, which leaves
-    // the bare word. A catalyst quality line carries a qualifier before the
-    // colon, so the full prefix would miss it.
     let bare = cs::QUALITY.split(':').next().unwrap_or(cs::QUALITY);
 
     if section.iter().any(|l| l.starts_with(bare)) {
@@ -173,9 +138,6 @@ pub fn parse_jewelery(section: &[String], state: &mut ParserState) -> ParseOutco
     ParseOutcome::SectionSkipped
 }
 
-/// `Charm Slots: 1` on a belt.
-///
-/// Recorded value: none. Consumed so it is not read as a modifier.
 pub fn parse_charm_slots(section: &[String], state: &mut ParserState) -> ParseOutcome {
     if state.item.category != Some(ItemCategory::Belt) {
         return ParseOutcome::ParserSkipped;
@@ -188,11 +150,6 @@ pub fn parse_charm_slots(section: &[String], state: &mut ParserState) -> ParseOu
     ParseOutcome::SectionSkipped
 }
 
-/// `Spirit: 100` on a sceptre.
-///
-/// Recorded value: none here. The weapon stage records the number when the
-/// line shares a section with the other weapon numbers. This stage catches the
-/// case where it stands alone.
 pub fn parse_spirit(section: &[String], state: &mut ParserState) -> ParseOutcome {
     if state.item.category != Some(ItemCategory::Sceptre) {
         return ParseOutcome::ParserSkipped;
@@ -203,9 +160,6 @@ pub fn parse_spirit(section: &[String], state: &mut ParserState) -> ParseOutcome
             continue;
         };
 
-        // Read, not just consumed. This stage used to claim the section and
-        // throw the number away, and it runs before parse_weapon, so nothing
-        // else ever saw it. Spirit is the number a sceptre is bought for.
         state.item.weapon.spirit = leading_int(rest).map(|v| v as f64);
 
         return ParseOutcome::SectionParsed;
@@ -214,9 +168,6 @@ pub fn parse_spirit(section: &[String], state: &mut ParserState) -> ParseOutcome
     ParseOutcome::SectionSkipped
 }
 
-/// `Radius: Large` on a timeless jewel.
-///
-/// Recorded value: none. Consumed so it is not read as a modifier.
 pub fn parse_timelost_radius(section: &[String], state: &mut ParserState) -> ParseOutcome {
     if state.item.category != Some(ItemCategory::Jewel) {
         return ParseOutcome::ParserSkipped;
@@ -257,7 +208,6 @@ mod tests {
 
     #[test]
     fn a_thousands_separator_does_not_break_a_stack_size() {
-        // Portal scrolls stack to 40 but the game still groups the digits.
         let mut s = currency();
 
         parse_stack_size(&sec(&["Stack Size: 2,448/40"]), &mut s);
@@ -295,8 +245,6 @@ mod tests {
 
     #[test]
     fn a_malformed_stack_size_still_claims_the_section() {
-        // The reference claims the section on the prefix alone. Leaving it for
-        // the modifier stages would turn it into an unknown modifier.
         let mut s = currency();
 
         assert_eq!(
@@ -436,9 +384,6 @@ mod tests {
 
     #[test]
     fn a_sceptre_reports_its_spirit() {
-        // The stage used to claim the section and drop the number. It runs
-        // before parse_weapon, so nothing else ever saw the line, and spirit
-        // is what a sceptre is bought for.
         let mut s = ParserState::default();
         s.item.category = Some(ItemCategory::Sceptre);
 
@@ -450,7 +395,6 @@ mod tests {
 
     #[test]
     fn a_sceptre_section_with_no_spirit_line_is_left_alone() {
-        // Consuming it would eat whatever the section really held.
         let mut s = ParserState::default();
         s.item.category = Some(ItemCategory::Sceptre);
 

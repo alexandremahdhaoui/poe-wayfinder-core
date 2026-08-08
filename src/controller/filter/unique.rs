@@ -1,35 +1,14 @@
-//! Filters for uniques, anointments and incursion rooms.
-//!
-//! Ported from `create-unique-filters.ts`, `pseudo/anointments.ts` and
-//! `pseudo/atzoatl-rules.ts`.
-//!
-//! Three small rule sets that share one shape: an item whose price comes from
-//! something other than its modifier rolls.
-
 use crate::controller::parse::shared::special::AtzoatlRoom;
 use crate::types::item::ParsedItem;
 use crate::types::query::Range;
 
-/// How a unique should be searched for.
-///
-/// Ported from `createUniquePresets`. A unique's modifiers are fixed, so the
-/// only things that vary are its name, whether it is corrupted, and the
-/// handful of rolls that do move.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UniqueSearch {
-    /// Search by name alone. Most uniques.
     ByName,
-    /// Search by name and its item level, because the level gates its rolls.
     ByNameAndLevel,
-    /// Search by name and the link count, which is most of the price.
     ByNameAndLinks,
 }
 
-/// Uniques whose item level changes what they roll.
-///
-/// Ported from the level gated list. Searching one of these by name alone
-/// returns every copy including the ones that cannot roll what the buyer
-/// wants.
 const LEVEL_GATED: &[&str] = &[
     "Tabula Rasa",
     "The Anvil",
@@ -38,7 +17,6 @@ const LEVEL_GATED: &[&str] = &[
     "Voll's Devotion",
 ];
 
-/// Which search a unique calls for.
 pub fn unique_search(item: &ParsedItem) -> UniqueSearch {
     let name = item.info.name.as_str();
 
@@ -46,7 +24,6 @@ pub fn unique_search(item: &ParsedItem) -> UniqueSearch {
         return UniqueSearch::ByNameAndLevel;
     }
 
-    // A six link is most of what a body armour or two handed weapon is worth.
     if item
         .gem_sockets
         .is_some_and(|s| s.linked.is_some_and(|l| l >= 5))
@@ -57,10 +34,6 @@ pub fn unique_search(item: &ParsedItem) -> UniqueSearch {
     UniqueSearch::ByName
 }
 
-/// The link filter a unique deserves.
-///
-/// A five link and a six link are different markets. A floor rather than an
-/// exact match, because a six link satisfies someone shopping for a five.
 pub fn link_filter(item: &ParsedItem, search: UniqueSearch) -> Option<Range> {
     if search != UniqueSearch::ByNameAndLinks {
         return None;
@@ -71,7 +44,6 @@ pub fn link_filter(item: &ParsedItem, search: UniqueSearch) -> Option<Range> {
     Some(Range::at_least(f64::from(linked)))
 }
 
-/// The item level filter a level gated unique deserves.
 pub fn unique_level_filter(item: &ParsedItem, search: UniqueSearch) -> Option<Range> {
     if search != UniqueSearch::ByNameAndLevel {
         return None;
@@ -80,20 +52,11 @@ pub fn unique_level_filter(item: &ParsedItem, search: UniqueSearch) -> Option<Ra
     Some(Range::at_least(f64::from(item.item_level?)))
 }
 
-/// An anointment read off an amulet.
-///
-/// Ported from `anointments.ts`. The anointed passive is worth more than the
-/// amulet on a cheap base, so it is filtered on its own.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Anointment {
-    /// The passive the amulet grants.
     pub passive: String,
 }
 
-/// Read the anointment off an item.
-///
-/// The game prints it as an enchant naming the passive. Nothing else on an
-/// amulet is an enchant, so the namespace alone identifies it.
 pub fn anointment(item: &ParsedItem) -> Option<Anointment> {
     use crate::types::modifier::ModifierType;
 
@@ -107,8 +70,6 @@ pub fn anointment(item: &ParsedItem) -> Option<Anointment> {
                 continue;
             };
 
-            // The reference strips a trailing reminder about the passive
-            // needing to be adjacent to the tree.
             let passive = passive
                 .split(" (")
                 .next()
@@ -127,11 +88,6 @@ pub fn anointment(item: &ParsedItem) -> Option<Anointment> {
     None
 }
 
-/// How much a Chronicle of Atzoatl is worth searching on.
-///
-/// Ported from `atzoatl-rules.ts`. Only a handful of rooms carry any price and
-/// filtering on the rest returns nothing, because no two chronicles share a
-/// full room list.
 const VALUABLE_ROOMS: &[&str] = &[
     "Apex of Ascension",
     "Hall of Offerings",
@@ -145,10 +101,6 @@ const VALUABLE_ROOMS: &[&str] = &[
     "Court of Sealed Death",
 ];
 
-/// Which of an item's rooms are worth filtering on.
-///
-/// Only open ones. An obstructed room needs opening first and is not what the
-/// buyer is paying for.
 pub fn valuable_rooms(rooms: &[AtzoatlRoom]) -> Vec<&str> {
     rooms
         .iter()
@@ -190,8 +142,6 @@ mod tests {
 
     #[test]
     fn a_level_gated_unique_carries_its_level() {
-        // Searching one by name alone returns every copy including those that
-        // cannot roll what the buyer wants.
         for name in LEVEL_GATED {
             assert_eq!(
                 unique_search(&unique(name)),
@@ -203,7 +153,6 @@ mod tests {
 
     #[test]
     fn a_linked_unique_carries_its_links() {
-        // A six link is most of what a body armour is worth.
         let item = ParsedItem {
             gem_sockets: Some(GemSockets {
                 number: 6,
@@ -213,7 +162,6 @@ mod tests {
             ..unique("Tabula Rasa")
         };
 
-        // Level gating wins, because it is checked first.
         assert_eq!(unique_search(&item), UniqueSearch::ByNameAndLevel);
 
         let item = ParsedItem {
@@ -244,7 +192,6 @@ mod tests {
 
     #[test]
     fn the_link_filter_is_a_floor() {
-        // A six link satisfies someone shopping for a five.
         let item = ParsedItem {
             gem_sockets: Some(GemSockets {
                 number: 6,
@@ -296,7 +243,6 @@ mod tests {
 
     #[test]
     fn an_anointment_is_read_from_the_enchant() {
-        // The anointed passive is worth more than the amulet on a cheap base.
         let item = ParsedItem {
             modifiers: vec![ParsedModifier {
                 info: ModifierInfo {
@@ -342,7 +288,6 @@ mod tests {
 
     #[test]
     fn an_explicit_allocation_is_not_an_anointment() {
-        // Only an enchant is one. A timeless jewel allocates passives too.
         let item = ParsedItem {
             modifiers: vec![ParsedModifier {
                 info: ModifierInfo {
@@ -368,8 +313,6 @@ mod tests {
 
     #[test]
     fn only_the_valuable_rooms_are_filtered_on() {
-        // No two chronicles share a full room list, so filtering on all of
-        // them returns nothing.
         let rooms = [
             room("Hall of Metallurgy", true),
             room("Sparring Room", true),
@@ -381,7 +324,6 @@ mod tests {
 
     #[test]
     fn an_obstructed_room_is_not_filtered_on() {
-        // It needs opening first and is not what the buyer is paying for.
         let rooms = [room("Apex of Ascension", false)];
 
         assert!(valuable_rooms(&rooms).is_empty());
@@ -404,7 +346,6 @@ mod tests {
 
     #[test]
     fn every_valuable_room_name_is_unique() {
-        // A duplicate would send the same filter twice.
         let mut names = VALUABLE_ROOMS.to_vec();
         let before = names.len();
         names.sort_unstable();

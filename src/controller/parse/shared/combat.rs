@@ -1,23 +1,3 @@
-//! Stages that read the defensive and offensive numbers.
-//!
-//! Ported from `parseArmour`, `parseWeapon` and `parseCaster` in
-//! `renderer/src/parser/Parser.ts`.
-//!
-//! # A unique's numbers are read like anything else
-//!
-//! These stages used to clear the armour and weapon values whenever the item
-//! was unique, reasoning that a base roll filter built from them would exclude
-//! every copy of the item.
-//!
-//! That is a filter decision made in the wrong place. The reference reads the
-//! numbers and asserts it does: `parsers.test.ts` "Unique Armour" expects an
-//! energy shield of 44 on a unique focus. Throwing them away here meant a
-//! unique's defences never reached the panel and could never be shown, and the
-//! decision about whether to filter on them could not be revisited.
-//!
-//! The filter layer makes that decision now, in `item_property.rs`, where the
-//! item's rarity is already known.
-
 use crate::controller::parse::shared::levels::parse_quality_nested;
 use crate::controller::parse::{ParseOutcome, ParserState};
 use crate::types::category::ItemCategory;
@@ -25,7 +5,6 @@ use crate::types::client_strings as cs;
 use crate::types::item::{ArmourStats, WeaponStats};
 use crate::util::number::{damage_list_sum, damage_range_avg, leading_float, leading_int};
 
-/// Armour, evasion, energy shield, ward and block.
 pub fn parse_armour(section: &[String], state: &mut ParserState) -> ParseOutcome {
     let mut parsed = false;
 
@@ -77,10 +56,6 @@ fn read_armour_line(line: &str, out: &mut ArmourStats) -> bool {
     false
 }
 
-/// Crit, attack speed, damage, reload and spirit.
-///
-/// Fire, cold and lightning damage each add into the elemental total rather
-/// than replacing it, because a weapon can print several element lines.
 pub fn parse_weapon(section: &[String], state: &mut ParserState) -> ParseOutcome {
     let mut parsed = false;
 
@@ -99,8 +74,6 @@ pub fn parse_weapon(section: &[String], state: &mut ParserState) -> ParseOutcome
 }
 
 fn read_weapon_line(line: &str, out: &mut WeaponStats) -> bool {
-    // Decimal fields. Crit chance and attack speed are never whole numbers, so
-    // leading_int would silently truncate 1.35 to 1.
     if let Some(rest) = line.strip_prefix(cs::CRIT_CHANCE) {
         out.crit = leading_float(rest);
 
@@ -131,8 +104,6 @@ fn read_weapon_line(line: &str, out: &mut WeaponStats) -> bool {
         return true;
     }
 
-    // Each element line records itself AND adds into the elemental total, so a
-    // filter can ask for fire damage on its own or for elemental as a whole.
     if let Some(rest) = line.strip_prefix(cs::FIRE_DAMAGE) {
         out.fire = damage_list_sum(rest);
         add_elemental(out, out.fire);
@@ -163,18 +134,12 @@ fn read_weapon_line(line: &str, out: &mut WeaponStats) -> bool {
     false
 }
 
-/// Add one element's damage into the elemental total.
 fn add_elemental(out: &mut WeaponStats, value: Option<f64>) {
     if let Some(v) = value {
         out.elemental = Some(out.elemental.unwrap_or(0.0) + v);
     }
 }
 
-/// A caster weapon section holding nothing but a quality line.
-///
-/// A wand with no spirit and no damage prints only its quality. Without this
-/// stage that section survives to the modifier stages and is read as a
-/// modifier.
 pub fn parse_caster(section: &[String], state: &mut ParserState) -> ParseOutcome {
     let applies = matches!(
         state.item.category,
@@ -245,9 +210,6 @@ mod tests {
 
     #[test]
     fn a_unique_keeps_its_armour_numbers() {
-        // The reference reads them and asserts it does. Clearing them here
-        // meant a unique's defences never reached the panel, and it put a
-        // filter decision in the parser. The filter layer decides.
         let mut s = ParserState::default();
         s.item.rarity = Some(crate::types::item::ItemRarity::Unique);
 
@@ -266,8 +228,6 @@ mod tests {
             parse_armour(&sec(&["Quality: +20%"]), &mut s),
             ParseOutcome::SectionSkipped
         );
-        // Quality is not read either, because the stage never claimed the
-        // section.
         assert_eq!(s.item.quality, None);
     }
 
@@ -366,8 +326,6 @@ mod tests {
 
     #[test]
     fn a_caster_weapon_claims_a_lone_quality_section() {
-        // Without this the section reaches the modifier stages and a quality
-        // line is read as an unknown modifier.
         let mut s = ParserState::default();
         s.item.category = Some(ItemCategory::Wand);
 
@@ -409,8 +367,6 @@ mod tests {
 
     #[test]
     fn a_caster_section_with_more_than_one_line_is_skipped() {
-        // A longer section belongs to the weapon stage, which reads the
-        // damage numbers as well as the quality.
         let mut s = ParserState::default();
         s.item.category = Some(ItemCategory::Wand);
 

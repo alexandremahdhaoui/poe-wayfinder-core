@@ -1,19 +1,9 @@
-//! Stages that read a level, a tier or a quality.
-//!
-//! Ported from `parseItemLevel`, `parseTalismanTier`,
-//! `parseGem`, `parseQualityNested` and `parseRequirements` in
-//! `renderer/src/parser/Parser.ts`.
-
 use crate::controller::parse::{ParseOutcome, ParserState};
 use crate::types::category::ItemCategory;
 use crate::types::client_strings as cs;
 use crate::types::item::Requirements;
 use crate::util::number::leading_int;
 
-/// Read a quality line anywhere in the section.
-///
-/// Not a stage. The reference calls this from inside other stages, because
-/// quality shares a section with the numbers it modifies.
 pub fn parse_quality_nested(section: &[String], state: &mut ParserState) {
     for line in section {
         if let Some(rest) = line.strip_prefix(cs::QUALITY) {
@@ -26,10 +16,6 @@ pub fn parse_quality_nested(section: &[String], state: &mut ParserState) {
     }
 }
 
-/// `Item Level: 84`.
-///
-/// A filled coffin prints `Corpse Level:` for the same idea, so the prefix
-/// depends on the base that was already looked up.
 pub fn parse_item_level(section: &[String], state: &mut ParserState) -> ParseOutcome {
     let prefix = if state.item.info.reference_name == "Filled Coffin" {
         cs::CORPSE_LEVEL
@@ -48,7 +34,6 @@ pub fn parse_item_level(section: &[String], state: &mut ParserState) -> ParseOut
     ParseOutcome::SectionSkipped
 }
 
-/// `Talisman Tier: 3`.
 pub fn parse_talisman_tier(section: &[String], state: &mut ParserState) -> ParseOutcome {
     let Some(first) = section.first() else {
         return ParseOutcome::SectionSkipped;
@@ -63,10 +48,6 @@ pub fn parse_talisman_tier(section: &[String], state: &mut ParserState) -> Parse
     ParseOutcome::SectionSkipped
 }
 
-/// `Level: 20 (Max)` on a gem.
-///
-/// The line sits on row two for a cut gem and row one for an uncut one, because
-/// a cut gem prints its tags first.
 pub fn parse_gem(section: &[String], state: &mut ParserState) -> ParseOutcome {
     let category = state.item.category;
 
@@ -99,10 +80,6 @@ pub fn parse_gem(section: &[String], state: &mut ParserState) -> ParseOutcome {
     ParseOutcome::SectionParsed
 }
 
-/// `Requires: Level 68, 155 Str, 62 Dex`.
-///
-/// A gem prints the same line but its requirements follow from its level, so
-/// the trade site does not filter on them.
 pub fn parse_requirements(section: &[String], state: &mut ParserState) -> ParseOutcome {
     let Some(first) = section.first() else {
         return ParseOutcome::SectionSkipped;
@@ -121,11 +98,6 @@ pub fn parse_requirements(section: &[String], state: &mut ParserState) -> ParseO
     ParseOutcome::SectionParsed
 }
 
-/// Read the body of a requires line.
-///
-/// The reference uses one long regex with four optional named groups. Here each
-/// attribute is found by its own keyword, which handles any order and needs no
-/// regex engine. A missing attribute reads as zero, matching the reference.
 fn parse_requires_line(rest: &str) -> Requirements {
     let mut out = Requirements::default();
 
@@ -143,7 +115,6 @@ fn parse_requires_line(rest: &str) -> Requirements {
         };
         let value = value as u32;
 
-        // Match the longer spelling first. "Str" is a prefix of "Strength".
         if part.contains("Strength") || part.contains("Str") {
             out.str = value;
         } else if part.contains("Dexterity") || part.contains("Dex") {
@@ -241,7 +212,6 @@ mod tests {
 
     #[test]
     fn a_negative_quality_keeps_its_sign() {
-        // Catalysts can drive quality below zero on some bases.
         let mut s = ParserState::default();
 
         parse_quality_nested(&sec(&["Quality: -10%"]), &mut s);
@@ -412,8 +382,6 @@ mod tests {
 
     #[test]
     fn a_gem_skips_requirements() {
-        // A gem's requirements follow from its level, so the trade site does
-        // not filter on them and reading them would add a useless filter.
         let mut s = ParserState::default();
         s.item.category = Some(ItemCategory::Gem);
 

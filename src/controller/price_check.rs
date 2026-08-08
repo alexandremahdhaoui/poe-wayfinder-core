@@ -1,12 +1,3 @@
-//! Clipboard text to a trade query.
-//!
-//! The one entry point the app needs. It parses, matches stats, builds the
-//! filters and returns both the item and the query.
-//!
-//! The item comes back alongside the query because the UI shows what was
-//! parsed. A user whose item priced oddly needs to see what the parser thought
-//! the item was.
-
 use crate::adapter::data_adapter::GameData;
 use crate::controller::bulk::{endpoint_for, Endpoint, RouteFacts};
 use crate::controller::filter::item_filters::{build_query, FilterOptions};
@@ -19,7 +10,6 @@ use crate::types::game::GameVersion;
 use crate::types::item::ParsedItem;
 use crate::types::query::TradeQuery;
 
-/// Everything a price check needs to know.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PriceCheckOptions {
     pub game: GameVersion,
@@ -28,7 +18,6 @@ pub struct PriceCheckOptions {
 }
 
 impl PriceCheckOptions {
-    /// Defaults for a game.
     pub fn new(game: GameVersion) -> Self {
         Self {
             game,
@@ -38,41 +27,16 @@ impl PriceCheckOptions {
     }
 }
 
-/// What a price check produced.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PriceCheck {
-    /// What the parser read.
     pub item: ParsedItem,
-    /// The query to send.
     pub query: TradeQuery,
-    /// Which endpoint to send it to.
-    ///
-    /// A currency priced on the search endpoint returns the handful of people
-    /// who listed one individually rather than the market rate.
     pub endpoint: Endpoint,
-    /// The id the exchange endpoint knows the item by.
-    ///
-    /// Only set when the endpoint is the exchange, because that is the only
-    /// request that carries it.
     pub trade_tag: Option<String>,
 }
 
 impl PriceCheck {
-    /// Whether the query narrows the search at all.
-    ///
-    /// # Why this has to be checked
-    ///
-    /// A query with no name, no base type, no stat filter and no property
-    /// filter matches every item on the trade site. The user sees a price and
-    /// nothing tells them it is the price of the whole market.
-    ///
-    /// It happens for a real reason: the base type comes from the data file,
-    /// so a stale or missing one leaves the query empty while the parse still
-    /// succeeds. Refusing is the only honest answer.
     pub fn constrains_something(&self) -> bool {
-        // A category or a rarity does not count. "Any non unique ring that is
-        // not corrupted" is most of the market, and a price built from it is
-        // the market's median rather than this item's price.
         self.query.name.is_some()
             || self.query.type_name.is_some()
             || self.query.stats.iter().any(|g| !g.filters.is_empty())
@@ -80,21 +44,15 @@ impl PriceCheck {
 }
 
 impl PriceCheck {
-    /// How many stat filters the query carries.
     pub fn stat_filter_count(&self) -> usize {
         self.query.stats.iter().map(|g| g.filters.len()).sum()
     }
 
-    /// Whether the parser met a modifier it did not recognise.
-    ///
-    /// The UI has to say so. A price built from a partly understood item is
-    /// wrong in a way the user cannot see.
     pub fn has_unknown_modifiers(&self) -> bool {
         !self.item.unknown_modifiers.is_empty()
     }
 }
 
-/// Turn clipboard text into a trade query.
 pub fn price_check(
     clipboard: &str,
     data: &dyn GameData,
@@ -104,8 +62,6 @@ pub fn price_check(
 
     let mut query = build_query(&item, options.filters);
 
-    // The item's own numbers reach the query here. A weapon is bought for its
-    // damage per second and that is not a modifier.
     let mut stats = options.stats;
     stats.facts = crate::controller::filter::rules::ItemFacts {
         is_unique: item.rarity == Some(crate::types::item::ItemRarity::Unique),
@@ -114,8 +70,6 @@ pub fn price_check(
             && !item.is_modifiable(),
     };
 
-    // A gem has no modifiers and currency has none. Sending a stat group for
-    // either is an empty group, which matches everything and slows the search.
     let preset = preset_for(&item);
 
     if let Some(range) = gem_level_filter(&item, preset) {
@@ -132,9 +86,6 @@ pub fn price_check(
         let built = build_stat_filters(&item.modifiers, properties, data, stats);
 
         query.stats.extend(built.and);
-        // A stat filed under several trade ids travels as its own count group.
-        // Folding it into the `and` group would require one listing to be
-        // filed under two ids at once, which no listing is.
         query.stats.extend(built.counts);
     }
 
@@ -150,9 +101,6 @@ pub fn price_check(
     let route = RouteFacts {
         trade_tag: item.info.trade_tag.clone(),
         category: item.category,
-        // A stack size filter is not built yet, so neither flag can be set.
-        // Leaving them false routes by the tag alone, which is right for every
-        // item but a card or map the user narrowed by stack size.
         stack_size_active: false,
         has_stack_size_filter: false,
         any_stat_enabled: query
@@ -175,10 +123,6 @@ pub fn price_check(
     })
 }
 
-/// Add the `not` group, if anything about this item calls for one.
-///
-/// An exclusion says a modifier must not be there. No filter built from what
-/// an item has can say that, so these two rules read what the item is missing.
 fn apply_exclusions(item: &ParsedItem, data: &dyn GameData, query: &mut TradeQuery) {
     use crate::controller::filter::exclusions::{
         flask_excludes_increased_effect, not_group, valdo_bad_mods, INCREASED_EFFECT,
@@ -199,9 +143,6 @@ fn apply_exclusions(item: &ParsedItem, data: &dyn GameData, query: &mut TradeQue
 
     wanted.extend(valdo_bad_mods(item, &references));
 
-    // Explicit, because that is where both modifiers live. A stat with no
-    // explicit id is one the site cannot exclude on, and sending an id it does
-    // not know fails the whole query.
     let ids: Vec<String> = wanted
         .into_iter()
         .filter_map(|reference| {
@@ -221,11 +162,6 @@ fn apply_exclusions(item: &ParsedItem, data: &dyn GameData, query: &mut TradeQue
     }
 }
 
-/// Add the heist filters, if this is a heist item.
-///
-/// PoE1 only. Kept out of the stat group builder because a contract's job is
-/// not a modifier and a blueprint's exclusion is a group of its own rather
-/// than a filter inside the `and` group.
 fn apply_heist_rules(item: &ParsedItem, data: &dyn GameData, query: &mut TradeQuery) {
     use crate::controller::filter::heist::{blueprint_exclusion, contract_filters, ENCHANT_MODS};
 
@@ -237,8 +173,6 @@ fn apply_heist_rules(item: &ParsedItem, data: &dyn GameData, query: &mut TradeQu
             .push(crate::types::query::StatGroup::all(filters));
     }
 
-    // The enchant count stat, looked up here rather than in the rule, because
-    // the rule takes no data and a filter with no trade id fails the query.
     let enchant_id = data
         .stat_by_matcher(ENCHANT_MODS)
         .and_then(|hit| {
@@ -386,8 +320,6 @@ mod tests {
 
     #[test]
     fn the_implicit_and_the_explicit_get_different_trade_ids() {
-        // The same stat has a different id per namespace, and mixing them up
-        // returns items with the modifier in the wrong slot.
         let got = price_check(
             &ring_text(),
             &data(),
@@ -407,8 +339,6 @@ mod tests {
 
     #[test]
     fn a_filter_is_enabled_only_when_its_roll_earns_it() {
-        // The rolls in this fixture carry no range, so each reads as the best
-        // possible and every filter is on. A badly rolled one would be off.
         let got = price_check(
             &ring_text(),
             &data(),
@@ -421,8 +351,6 @@ mod tests {
 
     #[test]
     fn an_item_whose_stats_are_all_unknown_still_yields_a_query() {
-        // Base type and category are enough to price many items. Refusing to
-        // search because a modifier was unreadable helps nobody.
         let empty = FakeData {
             stats: Vec::new(),
             items: Vec::new(),
@@ -464,8 +392,6 @@ mod tests {
 
     #[test]
     fn the_game_version_reaches_the_pipeline() {
-        // A PoE1 pipeline is missing the PoE2 only stages, so a PoE2 item
-        // parsed as PoE1 loses its spirit and charm slot sections.
         let poe1 = price_check(
             &ring_text(),
             &data(),
@@ -480,7 +406,6 @@ mod tests {
         )
         .unwrap();
 
-        // This item exercises no game specific stage, so both agree.
         assert_eq!(poe1.item.item_level, poe2.item.item_level);
     }
 
@@ -512,8 +437,6 @@ mod tests {
 
     #[test]
     fn the_parsed_item_comes_back_alongside_the_query() {
-        // A user whose item priced oddly needs to see what the parser thought
-        // the item was.
         let got = price_check(
             &ring_text(),
             &data(),
@@ -523,10 +446,6 @@ mod tests {
 
         assert_eq!(got.item.raw_text, ring_text());
     }
-
-    // -----------------------------------------------------------------
-    // Endpoint routing
-    // -----------------------------------------------------------------
 
     fn currency_text() -> String {
         [
@@ -567,8 +486,6 @@ mod tests {
 
     #[test]
     fn a_search_check_carries_no_bulk_tag() {
-        // The search request has nowhere to put one, and sending it would be
-        // an unread field that looks like it did something.
         let got = price_check(
             &ring_text(),
             &data(),
@@ -581,8 +498,6 @@ mod tests {
 
     #[test]
     fn a_currency_with_a_bulk_tag_goes_to_the_exchange_endpoint() {
-        // The search endpoint returns the handful of people who listed one
-        // individually rather than the market rate.
         let got = price_check(
             &currency_text(),
             &data_with_bulk_currency(),
@@ -596,8 +511,6 @@ mod tests {
 
     #[test]
     fn a_currency_our_data_has_no_tag_for_goes_to_the_search_endpoint() {
-        // Sending it to the exchange endpoint without a tag is a request the
-        // server rejects, and the user sees an error rather than a price.
         let got = price_check(
             &currency_text(),
             &data(),

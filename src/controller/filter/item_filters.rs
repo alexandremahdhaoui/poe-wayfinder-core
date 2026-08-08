@@ -1,17 +1,3 @@
-//! Turning a parsed item into a trade query.
-//!
-//! Ported from `create-item-filters.ts` and the query assembly half of
-//! `pathofexile-trade.ts`.
-//!
-//! # The rule that governs everything here
-//!
-//! **Filter on what identifies the item, not on everything it has.**
-//!
-//! An over specified query returns nothing, and an empty result reads as "this
-//! item is worthless" when it means "nobody else has this exact roll". So a
-//! rare searches by base type and category, never by name, because its name is
-//! random. A unique searches by name, because its name is the item.
-
 use crate::controller::filter::brackets::{ceil_to_bracket, floor_to_bracket, ITEM_LEVEL_BRACKETS};
 use crate::controller::filter::common::max_useful_item_level;
 use crate::types::category::ItemCategory;
@@ -20,20 +6,10 @@ use crate::types::query::{
     category_trade_ids, Filters, NameField, Range, Status, TradeQuery, TypeFilters,
 };
 
-/// How wide to search.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FilterOptions {
-    /// Include offline sellers.
     pub include_offline: bool,
-    /// Widen every numeric filter by this fraction.
-    ///
-    /// A query pinned to the exact roll matches only identical items. Ten
-    /// percent is the reference's default and finds comparable ones.
     pub roll_tolerance: f64,
-    /// Filter on item level.
-    ///
-    /// Off by default. Item level rarely changes a price and pinning it cuts
-    /// the result count hard.
     pub filter_item_level: bool,
 }
 
@@ -47,7 +23,6 @@ impl Default for FilterOptions {
     }
 }
 
-/// Build a trade query from a parsed item.
 pub fn build_query(item: &ParsedItem, options: FilterOptions) -> TradeQuery {
     let mut query = TradeQuery {
         status: if options.include_offline {
@@ -67,11 +42,6 @@ pub fn build_query(item: &ParsedItem, options: FilterOptions) -> TradeQuery {
     query
 }
 
-/// Decide what names the item.
-///
-/// A unique is its name. A rare's name is random, so it searches by base type
-/// only. Sending a rare's name returns exactly the one listing that is the
-/// same item, or none.
 fn apply_identity(item: &ParsedItem, query: &mut TradeQuery) {
     let discriminator = item.info.trade_discriminator.as_deref();
 
@@ -79,10 +49,6 @@ fn apply_identity(item: &ParsedItem, query: &mut TradeQuery) {
         Some(ItemRarity::Unique) if !item.is_unidentified => {
             query.name = Some(NameField::new(&item.info.name, None));
 
-            // The base, not the unique's own name. `Kaom's Heart` is a name
-            // and `Glorious Plate` is a type, and sending the first as the
-            // type matches nothing. When the base is unknown the type is left
-            // off, because the name alone still finds the item.
             if let Some(base) = &item.info.unique_base {
                 query.type_name = Some(NameField::new(base, discriminator));
             }
@@ -95,27 +61,13 @@ fn apply_identity(item: &ParsedItem, query: &mut TradeQuery) {
     }
 }
 
-/// Category, rarity, item level and quality.
-/// The item level filter, or nothing when the level says nothing about price.
-///
-/// # When item level is not worth sending
-///
-/// A tablet, a jewel and a map roll the same modifiers at every level, so the
-/// level narrows nothing and only excludes listings. A unique's level says
-/// nothing about its rolls at all.
-///
-/// A cluster jewel is the exception that gets a two ended range. Its passive
-/// count is tied to bands of item level, so a buyer wants the band and not a
-/// floor.
 fn item_level_range(item: &ParsedItem) -> Option<Range> {
     let level = item.item_level?;
 
-    // These roll the same modifiers at every level.
     if max_useful_item_level(item.category) == 1 {
         return None;
     }
 
-    // A unique's level says nothing about its rolls.
     if item.rarity == Some(ItemRarity::Unique) {
         return None;
     }
@@ -123,24 +75,15 @@ fn item_level_range(item: &ParsedItem) -> Option<Range> {
     if item.category == Some(ItemCategory::ClusterJewel) {
         return Some(Range {
             min: Some(f64::from(floor_to_bracket(level, ITEM_LEVEL_BRACKETS))),
-            // The upper brackets run downwards because they mark the top of
-            // each band rather than the bottom.
             max: Some(f64::from(ceil_to_bracket(level, CLUSTER_UPPER_BRACKETS))),
         });
     }
 
-    // Capped. Item level stops mattering once every modifier the base can roll
-    // is reachable, and filtering above the cap excludes cheaper listings that
-    // are just as good.
     Some(Range::at_least(f64::from(
         level.min(max_useful_item_level(item.category)),
     )))
 }
 
-/// The tops of the cluster jewel item level bands.
-///
-/// Descending because each marks the top of a band. Rounding up through them
-/// in order finds the band the level sits in.
 const CLUSTER_UPPER_BRACKETS: &[u32] = &[49, 67, 74, 100];
 
 fn apply_type_filters(item: &ParsedItem, options: FilterOptions, out: &mut TypeFilters) {
@@ -150,12 +93,9 @@ fn apply_type_filters(item: &ParsedItem, options: FilterOptions, out: &mut TypeF
             .map(|s| (*s).to_string());
     }
 
-    // A foil unique is a different market from a plain one.
     if item.is_foil {
         out.rarity = Some("uniquefoil".to_string());
     } else if item.rarity != Some(ItemRarity::Unique) && item.category.is_some() {
-        // Excluding uniques stops a rare search matching a unique of the same
-        // base, which is almost always priced very differently.
         out.rarity = Some("nonunique".to_string());
     }
 
@@ -165,8 +105,6 @@ fn apply_type_filters(item: &ParsedItem, options: FilterOptions, out: &mut TypeF
         }
     }
 
-    // Quality only matters where it changes the numbers. On a gem it is most
-    // of the price.
     if item.category.is_some_and(ItemCategory::is_gem) {
         if let Some(quality) = item.quality {
             out.quality = Range::at_least(f64::from(quality));
@@ -174,12 +112,9 @@ fn apply_type_filters(item: &ParsedItem, options: FilterOptions, out: &mut TypeF
     }
 }
 
-/// Corruption, identification, gem level and the rest.
 fn apply_misc_filters(item: &ParsedItem, out: &mut Filters) {
     let misc = &mut out.misc_filters;
 
-    // Corruption is always filtered, both ways. A corrupted item cannot be
-    // crafted further and is worth less, so mixing the two prices badly.
     misc.corrupted = Some(item.is_corrupted);
 
     if item.is_mirrored {
@@ -198,12 +133,6 @@ fn apply_misc_filters(item: &ParsedItem, out: &mut Filters) {
         misc.fractured_item = Some(true);
     }
 
-    // Only stated when the item is unidentified. An identified item is the
-    // normal case and saying so narrows nothing.
-    //
-    // The tier replaces the flag rather than joining it. A tiered
-    // unidentified item is unidentified by definition, so the flag adds
-    // nothing, and the reference asserts the two are never sent together.
     match item.unidentified_tier {
         Some(tier) => misc.unidentified_tier = Range::exactly(f64::from(tier)),
         None if item.is_unidentified => misc.identified = Some(false),
@@ -225,7 +154,6 @@ fn apply_misc_filters(item: &ParsedItem, out: &mut Filters) {
     }
 }
 
-/// Defences, offence and rune sockets.
 fn apply_equipment_filters(item: &ParsedItem, options: FilterOptions, out: &mut Filters) {
     let eq = &mut out.equipment_filters;
     let tolerance = options.roll_tolerance;
@@ -240,8 +168,6 @@ fn apply_equipment_filters(item: &ParsedItem, options: FilterOptions, out: &mut 
     set_with_tolerance(&mut eq.spirit, item.weapon.spirit, tolerance);
     set_with_tolerance(&mut eq.reload_time, item.weapon.reload, tolerance);
 
-    // Damage per second, not damage. The trade site indexes dps, and an item
-    // with the same damage at a different attack speed is a different item.
     if let Some(aps) = item.weapon.attack_speed {
         set_with_tolerance(
             &mut eq.pdps,
@@ -268,12 +194,9 @@ fn apply_equipment_filters(item: &ParsedItem, options: FilterOptions, out: &mut 
     }
 }
 
-/// Map tier and the waystone numbers.
 fn apply_map_filters(item: &ParsedItem, options: FilterOptions, out: &mut Filters) {
     let map = &mut out.map_filters;
 
-    // Tier is pinned exactly. A tier 15 and a tier 16 map are different items
-    // with different prices, so a tolerance here would be wrong.
     if let Some(tier) = item.map.tier {
         map.map_tier = Range::exactly(f64::from(tier));
     }
@@ -310,10 +233,6 @@ fn apply_map_filters(item: &ParsedItem, options: FilterOptions, out: &mut Filter
     }
 }
 
-/// Set a floor `tolerance` below the value.
-///
-/// A query pinned to the exact roll matches only identical items. The floor is
-/// rounded down so a value that renders with one decimal still matches itself.
 fn set_with_tolerance(range: &mut Range, value: Option<f64>, tolerance: f64) {
     let Some(value) = value else {
         return;
@@ -351,8 +270,6 @@ mod tests {
 
     #[test]
     fn a_rare_searches_by_base_type_and_never_by_name() {
-        // A rare's name is random. Sending it returns the one listing that is
-        // this exact item, or none.
         let q = build_query(&rare_bow(), FilterOptions::default());
 
         assert!(q.name.is_none());
@@ -361,7 +278,6 @@ mod tests {
 
     #[test]
     fn a_rare_excludes_uniques() {
-        // A unique of the same base is almost always priced very differently.
         let q = build_query(&rare_bow(), FilterOptions::default());
 
         assert_eq!(q.filters.type_filters.rarity.as_deref(), Some("nonunique"));
@@ -373,9 +289,6 @@ mod tests {
             rarity: Some(ItemRarity::Unique),
             category: Some(ItemCategory::BodyArmour),
             info: BaseInfo {
-                // What the parser actually produces. The unique's entry names
-                // the unique in both fields, and the base comes from the line
-                // under it.
                 name: "Kaom's Heart".into(),
                 reference_name: "Kaom's Heart".into(),
                 unique_base: Some("Glorious Plate".into()),
@@ -388,15 +301,11 @@ mod tests {
 
         assert_eq!(q.name.as_ref().unwrap().name(), "Kaom's Heart");
         assert_eq!(q.type_name.as_ref().unwrap().name(), "Glorious Plate");
-        // A unique search must not exclude uniques.
         assert_eq!(q.filters.type_filters.rarity, None);
     }
 
     #[test]
     fn a_unique_never_sends_its_own_name_as_the_type() {
-        // No base is called Kaom's Heart, so a query typed that way matches
-        // nothing. This is what the overlay sent for every unique in both
-        // games.
         let item = ParsedItem {
             rarity: Some(ItemRarity::Unique),
             category: Some(ItemCategory::BodyArmour),
@@ -416,8 +325,6 @@ mod tests {
 
     #[test]
     fn a_unique_whose_base_is_unknown_searches_by_name_alone() {
-        // A name with no type still finds the item. A name with a wrong type
-        // finds nothing, so leaving the type off is the safe answer.
         let item = ParsedItem {
             rarity: Some(ItemRarity::Unique),
             category: Some(ItemCategory::BodyArmour),
@@ -452,9 +359,6 @@ mod tests {
 
     #[test]
     fn a_tiered_unidentified_item_sends_the_tier_instead_of_the_flag() {
-        // The reference asserts the two are never sent together. A tiered
-        // unidentified item is unidentified by definition, so the flag adds
-        // nothing to a filter that already implies it.
         let item = ParsedItem {
             rarity: Some(ItemRarity::Rare),
             is_unidentified: true,
@@ -473,7 +377,6 @@ mod tests {
 
     #[test]
     fn an_unidentified_unique_searches_by_base_type_only() {
-        // Its name is not printed yet, so there is nothing to search by.
         let item = ParsedItem {
             rarity: Some(ItemRarity::Unique),
             is_unidentified: true,
@@ -544,7 +447,6 @@ mod tests {
 
     #[test]
     fn a_category_with_no_trade_id_sets_none() {
-        // Currency trades by name. A guessed id returns nothing.
         let item = ParsedItem {
             category: Some(ItemCategory::Currency),
             info: BaseInfo {
@@ -561,7 +463,6 @@ mod tests {
 
     #[test]
     fn item_level_is_not_filtered_by_default() {
-        // It rarely changes a price and pinning it cuts the result count hard.
         let q = build_query(&rare_bow(), FilterOptions::default());
 
         assert!(q.filters.type_filters.ilvl.is_empty());
@@ -576,15 +477,11 @@ mod tests {
 
         let q = build_query(&rare_bow(), options);
 
-        // Capped at 82. Item level stops mattering once every modifier a bow
-        // can roll is reachable, and 84 excludes cheaper listings that are
-        // just as good.
         assert_eq!(q.filters.type_filters.ilvl.min, Some(82.0));
     }
 
     #[test]
     fn a_wand_caps_lower_than_a_bow() {
-        // Its last modifier tier unlocks at 81.
         let options = FilterOptions {
             filter_item_level: true,
             ..FilterOptions::default()
@@ -621,8 +518,6 @@ mod tests {
 
     #[test]
     fn a_base_whose_level_says_nothing_is_not_filtered() {
-        // A jewel and a map roll the same modifiers at every level, so the
-        // filter narrows nothing and only excludes listings.
         let options = FilterOptions {
             filter_item_level: true,
             ..FilterOptions::default()
@@ -647,7 +542,6 @@ mod tests {
 
     #[test]
     fn a_unique_is_not_filtered_by_item_level() {
-        // Its level says nothing about its rolls.
         let options = FilterOptions {
             filter_item_level: true,
             ..FilterOptions::default()
@@ -667,8 +561,6 @@ mod tests {
 
     #[test]
     fn a_cluster_jewel_gets_a_two_ended_band() {
-        // Its passive count is tied to bands of item level, so a buyer wants
-        // the band and not a floor.
         let options = FilterOptions {
             filter_item_level: true,
             ..FilterOptions::default()
@@ -688,7 +580,6 @@ mod tests {
 
     #[test]
     fn a_cluster_jewel_band_always_contains_its_own_level() {
-        // A band that excluded the item it came from would return nothing.
         let options = FilterOptions {
             filter_item_level: true,
             ..FilterOptions::default()
@@ -710,8 +601,6 @@ mod tests {
 
     #[test]
     fn corruption_is_always_stated_in_both_directions() {
-        // A corrupted item cannot be crafted further and is worth less, so
-        // mixing the two prices badly in both directions.
         let plain = build_query(&rare_bow(), FilterOptions::default());
         assert_eq!(plain.filters.misc_filters.corrupted, Some(false));
 
@@ -725,7 +614,6 @@ mod tests {
 
     #[test]
     fn an_identified_item_states_nothing_about_identification() {
-        // It is the normal case and saying so narrows nothing.
         let q = build_query(&rare_bow(), FilterOptions::default());
 
         assert_eq!(q.filters.misc_filters.identified, None);
@@ -733,8 +621,6 @@ mod tests {
 
     #[test]
     fn each_rare_flag_is_only_sent_when_true() {
-        // Sending false would exclude every item that has the property, which
-        // is a very different search.
         let q = build_query(&rare_bow(), FilterOptions::default());
         let misc = &q.filters.misc_filters;
 
@@ -758,7 +644,6 @@ mod tests {
 
     #[test]
     fn a_defensive_number_becomes_a_floor_below_the_roll() {
-        // Pinning the exact roll matches only identical items.
         let item = ParsedItem {
             armour: ArmourStats {
                 ar: Some(500.0),
@@ -802,7 +687,6 @@ mod tests {
 
     #[test]
     fn a_zero_number_sets_no_filter() {
-        // A floor of zero matches everything and only slows the search.
         let item = ParsedItem {
             armour: ArmourStats {
                 ar: Some(0.0),
@@ -818,8 +702,6 @@ mod tests {
 
     #[test]
     fn damage_is_filtered_as_damage_per_second() {
-        // The trade site indexes dps. The same damage at a different attack
-        // speed is a different item.
         let item = ParsedItem {
             weapon: WeaponStats {
                 physical: Some(100.0),
@@ -831,7 +713,6 @@ mod tests {
 
         let q = build_query(&item, FilterOptions::default());
 
-        // 100 * 1.5 = 150 pdps, minus ten percent.
         assert_eq!(q.filters.equipment_filters.pdps.min, Some(135.0));
         assert_eq!(q.filters.equipment_filters.dps.min, Some(135.0));
     }
@@ -857,8 +738,6 @@ mod tests {
 
     #[test]
     fn damage_without_an_attack_speed_sets_no_dps_filter() {
-        // Damage per second is undefined without it, and sending the raw
-        // damage as dps would understate the weapon by a factor of two.
         let item = ParsedItem {
             weapon: WeaponStats {
                 physical: Some(100.0),
@@ -891,8 +770,6 @@ mod tests {
 
     #[test]
     fn a_map_tier_is_pinned_exactly() {
-        // A tier 15 and a tier 16 map are different items with different
-        // prices, so a tolerance would be wrong.
         let item = ParsedItem {
             category: Some(ItemCategory::Map),
             map: MapStats {
@@ -952,8 +829,6 @@ mod tests {
 
     #[test]
     fn gem_quality_is_filtered_and_weapon_quality_is_not() {
-        // On a gem quality is most of the price. On a weapon the numbers it
-        // scales are already filtered, so filtering it too narrows twice.
         let gem = ParsedItem {
             category: Some(ItemCategory::Gem),
             quality: Some(20),
@@ -976,8 +851,6 @@ mod tests {
 
     #[test]
     fn the_default_search_is_online_sellers_only() {
-        // Offline listings never reply, and including them makes every price
-        // look lower than it is.
         let q = build_query(&rare_bow(), FilterOptions::default());
 
         assert_eq!(q.status, Status::Online);
@@ -997,8 +870,6 @@ mod tests {
 
     #[test]
     fn an_item_with_no_base_name_sends_no_type() {
-        // Sending an empty string searches for an item called "", which
-        // returns nothing and looks like the item is worthless.
         let item = ParsedItem {
             rarity: Some(ItemRarity::Rare),
             ..ParsedItem::default()

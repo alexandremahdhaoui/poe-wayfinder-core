@@ -1,89 +1,25 @@
-//! Turning a stat line into the templates the data files are keyed by.
-//!
-//! Ported from `_statPlaceholderGenerator` in
-//! `renderer/src/parser/stat-translations.ts`.
-//!
-//! # The problem
-//!
-//! The game prints `+25 to maximum Life`. The data file is keyed by
-//! `# to maximum Life`. Replacing every number with a hash looks like it would
-//! be enough, and it is not.
-//!
-//! `Adds 5 to 12 Fire Damage to Attacks` has two numbers and both are rolls.
-//! `+2 to Level of all Fire Skill Gems` has one number that is a roll.
-//! `Grants Level 20 Purity of Fire` has one number that is part of the name.
-//!
-//! Nothing in the text says which is which. So the parser produces every
-//! template the line could be, most placeheld first, and the first one the
-//! data file recognises wins.
-//!
-//! # Advanced Item Description
-//!
-//! With it on the game also prints the roll's range inline.
-//!
-//! ```text
-//! +25(20-30) to maximum Life
-//! ```
-//!
-//! That is where the min and max on each match come from. Without it the
-//! range is unknown and the client cannot tell a good roll from a bad one.
-//!
-//! # The plus sign is part of the key
-//!
-//! Swallowing the printed `+` into the number looks harmless and is not. The
-//! trade data keys 271 PoE2 stats and 1072 PoE1 stats with the sign left in,
-//! `+# to Level of all Arc Skills` among them, and those never matched.
-//!
-//! It cannot be fixed by dropping the sign from the data either. PoE1 ships
-//! `+#% Chance to Block Spell Damage` and `#% Chance to Block Spell Damage` as
-//! two different trade stats. Merging them would price against the wrong one.
-//!
-//! So both spellings are produced, signed first, and the data file decides.
-
 use crate::types::client_strings as cs;
 
-/// One number found in a stat line.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NumMatch {
-    /// The value as printed.
     pub roll: f64,
-    /// The exact characters, kept so a template can restore them verbatim.
     pub roll_str: String,
-    /// Whether any part of the number or its range carried a decimal point.
     pub decimal: bool,
-    /// Whether the game printed an explicit `+` in front of the number.
-    ///
-    /// Kept because the data files key some stats with the sign and some
-    /// without, and the two are different stats. See `candidates`.
     pub signed: bool,
-    /// The roll's possible range, when the game printed one.
     pub bounds: Option<(f64, f64)>,
 }
 
-/// One candidate template and the numbers it left as placeholders.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Candidate {
-    /// The stat text with some numbers replaced by `#`.
     pub template: String,
-    /// The numbers this template treats as rolls, in order.
     pub values: Vec<NumMatch>,
 }
 
-/// Which indices keep their literal value, per number count.
-///
-/// Copied from `PLACEHOLDER_MAP`. Order is the search order, so the most
-/// placeheld template is tried first. A template that keeps a literal only
-/// wins when the data file has no more general form.
 const PLACEHOLDER_MAP: [&[&[usize]]; 5] = [
-    // 0 numbers.
     &[&[]],
-    // 1 number.
     &[&[0], &[]],
-    // 2 numbers.
     &[&[0, 1], &[0], &[1], &[]],
-    // 3 numbers.
     &[&[0, 1, 2], &[1, 2], &[0, 2], &[0, 1], &[2], &[1], &[0], &[]],
-    // 4 numbers.
     &[
         &[0, 1, 2, 3],
         &[1, 2, 3],
@@ -104,15 +40,12 @@ const PLACEHOLDER_MAP: [&[&[usize]]; 5] = [
     ],
 ];
 
-/// A stat line and whether its value can be scaled.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatString {
     pub string: String,
-    /// The game marked this value as not scalable by quality or increases.
     pub unscalable: bool,
 }
 
-/// Split the unscalable marker off a stat line.
 pub fn split_unscalable(text: &str) -> StatString {
     match text.strip_suffix(cs::UNSCALABLE_VALUE) {
         Some(rest) => StatString {
@@ -126,26 +59,15 @@ pub fn split_unscalable(text: &str) -> StatString {
     }
 }
 
-/// Whether a line is a reminder string rather than a stat.
-///
-/// The game wraps explanatory text in parentheses. It is not a stat and
-/// matching it against the data file would waste every lookup on it.
 pub fn opens_reminder(line: &str) -> bool {
     line.trim_start().starts_with(['(', '（'])
 }
 
-/// Whether a line closes a reminder string.
 pub fn closes_reminder(line: &str) -> bool {
     line.trim_end().ends_with([')', '）'])
 }
 
-/// Every template a stat line could be, most placeheld first.
-///
-/// The last entry is always the line verbatim, so a stat whose text contains
-/// no rolls at all still gets one chance to match.
 pub fn candidates(stat: &str) -> Vec<Candidate> {
-    // The game prints `()` when it has no range to give. Leaving it in makes
-    // the template miss.
     let cleaned = stat.replace("()", "");
 
     let (with_placeholders, matches) = to_template(&cleaned);
@@ -161,9 +83,6 @@ pub fn candidates(stat: &str) -> Vec<Candidate> {
                 .map(|(_, m)| m.clone())
                 .collect();
 
-            // The signed form first, because it is what the game printed. Both
-            // spellings exist in the data and they are not always the same
-            // stat, so the exact one has to win. See the doc comment.
             if values.iter().any(|m| m.signed) {
                 out.push(Candidate {
                     template: restore_signed(&with_placeholders, &matches, keep),
@@ -178,7 +97,6 @@ pub fn candidates(stat: &str) -> Vec<Candidate> {
         }
     }
 
-    // Fall back to the exact text. A line with five numbers gets only this.
     out.push(Candidate {
         template: stat.to_string(),
         values: Vec::new(),
@@ -187,11 +105,6 @@ pub fn candidates(stat: &str) -> Vec<Candidate> {
     out
 }
 
-/// The same, with the printed `+` kept in front of each placeholder.
-///
-/// `+2 to Level of all Arc Skills` is keyed as `+# to Level of all Arc Skills`
-/// and `+79 to maximum Life` is keyed as `# to maximum Life`. One data file
-/// holds both spellings, so the parser has to be able to write both.
 fn restore_signed(template: &str, matches: &[NumMatch], keep: &[usize]) -> String {
     let mut out = String::with_capacity(template.len() + matches.len());
     let mut idx = 0;
@@ -219,7 +132,6 @@ fn restore_signed(template: &str, matches: &[NumMatch], keep: &[usize]) -> Strin
     out
 }
 
-/// Put literal values back at the indices in `keep`.
 fn restore(template: &str, matches: &[NumMatch], keep: &[usize]) -> String {
     let mut out = String::with_capacity(template.len());
     let mut idx = 0;
@@ -243,11 +155,6 @@ fn restore(template: &str, matches: &[NumMatch], keep: &[usize]) -> String {
     out
 }
 
-/// Replace every roll in a stat line with `#`.
-///
-/// Hand written rather than regex driven. The reference pattern relies on a
-/// negative lookbehind, which Rust's regex crate cannot express, and a scanner
-/// makes the "not preceded by a digit or a close paren" rule explicit anyway.
 fn to_template(stat: &str) -> (String, Vec<NumMatch>) {
     let chars: Vec<char> = stat.chars().collect();
     let mut out = String::with_capacity(stat.len());
@@ -255,8 +162,6 @@ fn to_template(stat: &str) -> (String, Vec<NumMatch>) {
     let mut i = 0;
 
     while i < chars.len() {
-        // A number that follows a digit or a close paren is part of a range
-        // the scanner already consumed, not a new roll.
         let follows_number = i > 0 && (chars[i - 1].is_ascii_digit() || chars[i - 1] == ')');
 
         if follows_number {
@@ -290,8 +195,6 @@ fn to_template(stat: &str) -> (String, Vec<NumMatch>) {
             None => None,
         };
 
-        // A range the scanner could not read stays in the template verbatim.
-        // Dropping it would make the template match a different stat.
         out.push('#');
 
         if bounds.is_none() {
@@ -314,9 +217,6 @@ fn to_template(stat: &str) -> (String, Vec<NumMatch>) {
     (out, matches)
 }
 
-/// Read a signed number at `start`.
-///
-/// Returns the text and the index after it.
 fn read_number(chars: &[char], start: usize) -> Option<(String, usize)> {
     let mut i = start;
     let mut text = String::new();
@@ -337,7 +237,6 @@ fn read_number(chars: &[char], start: usize) -> Option<(String, usize)> {
         return None;
     }
 
-    // A decimal part only counts when a digit follows the point.
     if i + 1 < chars.len() && chars[i] == '.' && chars[i + 1].is_ascii_digit() {
         text.push('.');
         i += 1;
@@ -351,11 +250,6 @@ fn read_number(chars: &[char], start: usize) -> Option<(String, usize)> {
     Some((text, i))
 }
 
-/// Read a `(min-max)` or `(min)` range at `start`.
-///
-/// Returns the two halves and the index after the range. A `(min)` with no
-/// max reads as `min-min`, matching the reference, because a legacy roll
-/// prints only one bound.
 fn read_bounds(chars: &[char], start: usize) -> (Option<(String, String)>, usize) {
     if start >= chars.len() || chars[start] != '(' {
         return (None, start);
@@ -367,8 +261,6 @@ fn read_bounds(chars: &[char], start: usize) -> (Option<(String, String)>, usize
         return (None, start);
     }
 
-    // The first character is taken unconditionally so a negative bound keeps
-    // its sign. Everything after it stops at a hyphen or a close paren.
     let mut min = String::new();
     min.push(chars[i]);
     i += 1;
@@ -392,7 +284,6 @@ fn read_bounds(chars: &[char], start: usize) -> (Option<(String, String)>, usize
         max = Some(text);
     }
 
-    // An unterminated range is not a range.
     if i >= chars.len() || chars[i] != ')' {
         return (None, start);
     }
@@ -409,10 +300,6 @@ mod tests {
     fn templates(stat: &str) -> Vec<String> {
         candidates(stat).into_iter().map(|c| c.template).collect()
     }
-
-    // -----------------------------------------------------------------
-    // Reading numbers
-    // -----------------------------------------------------------------
 
     #[test]
     fn one_roll_becomes_a_placeholder() {
@@ -459,7 +346,6 @@ mod tests {
 
     #[test]
     fn a_trailing_dot_is_not_read_as_a_decimal_point() {
-        // "Regenerate 5 Life per second." ends in a full stop.
         let (t, m) = to_template("Regenerate 5 Life.");
 
         assert_eq!(t, "Regenerate # Life.");
@@ -474,10 +360,6 @@ mod tests {
         assert!(m.is_empty());
     }
 
-    // -----------------------------------------------------------------
-    // Reading inline ranges
-    // -----------------------------------------------------------------
-
     #[test]
     fn an_inline_range_becomes_bounds() {
         let (t, m) = to_template("+25(20-30) to maximum Life");
@@ -489,7 +371,6 @@ mod tests {
 
     #[test]
     fn a_range_with_one_bound_reads_as_a_point() {
-        // A legacy roll prints only one bound.
         let (_, m) = to_template("+25(25) to maximum Life");
 
         assert_eq!(m[0].bounds, Some((25.0, 25.0)));
@@ -497,8 +378,6 @@ mod tests {
 
     #[test]
     fn a_negative_lower_bound_keeps_its_sign() {
-        // The first character of the bound is taken unconditionally, which is
-        // the only reason a leading minus survives.
         let (_, m) = to_template("+5(-10-20)% to Resistance");
 
         assert_eq!(m[0].bounds, Some((-10.0, 20.0)));
@@ -514,7 +393,6 @@ mod tests {
 
     #[test]
     fn a_range_the_scanner_cannot_read_stays_in_the_template() {
-        // Dropping it would make the template match a different stat.
         let (t, m) = to_template("+25(unknown) to maximum Life");
 
         assert_eq!(t, "#(unknown-unknown) to maximum Life");
@@ -523,10 +401,6 @@ mod tests {
 
     #[test]
     fn an_unterminated_range_falls_apart_into_separate_rolls() {
-        // Faithful to the reference. Its regex needs a closing paren for the
-        // range group, so the numbers inside an unterminated one are scanned
-        // again as ordinary rolls. The result is a template that matches
-        // nothing, which is the right outcome for malformed text.
         let (t, m) = to_template("+25(20-30 to maximum Life");
 
         assert_eq!(t, "#(#-# to maximum Life");
@@ -545,8 +419,6 @@ mod tests {
 
     #[test]
     fn a_number_inside_a_range_is_not_read_as_a_new_roll() {
-        // Without the preceding character check, 20 and 30 inside the range
-        // would each become their own placeholder.
         let (_, m) = to_template("+25(20-30) to maximum Life");
 
         assert_eq!(m.len(), 1);
@@ -554,17 +426,12 @@ mod tests {
 
     #[test]
     fn an_empty_range_marker_is_removed_before_matching() {
-        // The game prints () when it has no advanced description to give.
         assert!(
             templates("Passives in Radius of Wicked Ward() can be Allocated")
                 .iter()
                 .any(|t| t == "Passives in Radius of Wicked Ward can be Allocated")
         );
     }
-
-    // -----------------------------------------------------------------
-    // Candidate generation
-    // -----------------------------------------------------------------
 
     #[test]
     fn a_one_number_line_yields_both_readings_plus_the_verbatim_text() {
@@ -573,13 +440,9 @@ mod tests {
         assert_eq!(
             got,
             vec![
-                // The number is part of the name.
                 "+25 to maximum Life",
-                // The number is a roll, keyed with the sign the game printed.
                 "+# to maximum Life",
-                // The number is a roll, keyed without it.
                 "# to maximum Life",
-                // Verbatim fallback.
                 "+25 to maximum Life",
             ]
         );
@@ -587,9 +450,6 @@ mod tests {
 
     #[test]
     fn a_signed_roll_offers_the_signed_key_before_the_unsigned_one() {
-        // The data holds "+# to Level of all Arc Skills" with the sign. Only
-        // offering "# to Level of all Arc Skills" never matched it, so a wand
-        // with +2 to Arc priced against every wand on the market.
         let got = templates("+2 to Level of all Arc Skills");
 
         let signed = got
@@ -607,9 +467,6 @@ mod tests {
 
     #[test]
     fn an_unsigned_roll_offers_no_signed_key() {
-        // "#% Chance to Block Spell Damage" and "+#% Chance to Block Spell
-        // Damage" are two different trade stats in PoE1. A line printed without
-        // a sign must never reach the signed one.
         let got = templates("25% Chance to Block Spell Damage");
 
         assert!(
@@ -620,8 +477,6 @@ mod tests {
 
     #[test]
     fn a_negative_roll_offers_no_signed_key() {
-        // The data files key nothing with "-#", so producing that variant would
-        // only add a lookup that can never hit.
         let got = templates("-15% to Fire Resistance");
 
         assert!(
@@ -640,8 +495,6 @@ mod tests {
 
     #[test]
     fn a_kept_literal_keeps_its_printed_sign_in_the_signed_form() {
-        // restore_signed writes roll_str for kept indices. Writing "+" and then
-        // "+25" would give "++25".
         let got = templates("+25 to maximum Life");
 
         assert!(!got.iter().any(|t| t.contains("++")), "{got:?}");
@@ -649,9 +502,6 @@ mod tests {
 
     #[test]
     fn the_most_placeheld_template_is_not_first() {
-        // The map keeps literals first, so a stat whose number is part of its
-        // name matches before the generic form. Reversing this would match
-        // "Grants Level # Purity of Fire" as a roll on every gem.
         let got = templates("Grants Level 20 Purity of Fire");
 
         assert_eq!(got[0], "Grants Level 20 Purity of Fire");
@@ -671,10 +521,8 @@ mod tests {
     fn a_candidate_carries_only_the_numbers_it_placeheld() {
         let got = candidates("Adds 5 to 12 Fire Damage");
 
-        // Both literal, so no rolls.
         assert!(got[0].values.is_empty());
 
-        // Both placeheld, so both are rolls.
         assert_eq!(got[3].values.len(), 2);
         assert_eq!(got[3].values[0].roll, 5.0);
         assert_eq!(got[3].values[1].roll, 12.0);
@@ -702,8 +550,6 @@ mod tests {
 
     #[test]
     fn a_five_number_line_yields_only_the_verbatim_text() {
-        // The map stops at four. Generating 32 templates for a line that long
-        // costs more than it finds.
         let got = templates("1 2 3 4 5");
 
         assert_eq!(got, vec!["1 2 3 4 5"]);
@@ -711,7 +557,6 @@ mod tests {
 
     #[test]
     fn a_line_with_no_numbers_yields_itself_twice() {
-        // Once from the zero number map entry and once from the fallback.
         let got = templates("Cannot be Frozen");
 
         assert_eq!(got, vec!["Cannot be Frozen", "Cannot be Frozen"]);
@@ -719,16 +564,10 @@ mod tests {
 
     #[test]
     fn restoring_uses_the_printed_characters_and_not_the_parsed_value() {
-        // "+25" must come back as "+25" and not as "25". The data file keys on
-        // the exact text.
         let got = templates("+25 to maximum Life");
 
         assert_eq!(got[0], "+25 to maximum Life");
     }
-
-    // -----------------------------------------------------------------
-    // Line level helpers
-    // -----------------------------------------------------------------
 
     #[test]
     fn the_unscalable_marker_is_split_off() {
@@ -742,8 +581,6 @@ mod tests {
 
     #[test]
     fn a_marker_written_with_a_hyphen_is_not_recognised() {
-        // The game prints an em dash. A hyphen here would leave the marker in
-        // the stat text and the lookup would miss.
         let got = split_unscalable("+25 to maximum Life - Unscalable Value");
 
         assert!(!got.unscalable);
@@ -766,7 +603,6 @@ mod tests {
 
     #[test]
     fn a_full_width_parenthesis_also_marks_a_reminder() {
-        // The game uses them in some fonts even in English text.
         assert!(opens_reminder("（reminder）"));
         assert!(closes_reminder("（reminder）"));
     }

@@ -1,16 +1,9 @@
-//! Stages for maps, waystones, heists, trials and help text.
-//!
-//! Ported from `parseMap`, `parseWaystone`, `parseCategoryByHelpText`,
-//! `parseHeistBlueprint`, `parseTrials`, `parseAreaLevel`, `parseSuperior`,
-//! `parseExceptional` and `parseRuneforged` in `renderer/src/parser/Parser.ts`.
-
 use crate::controller::parse::{ParseError, ParseOutcome, ParserState};
 use crate::types::category::ItemCategory;
 use crate::types::client_strings as cs;
 use crate::types::item::{Heist, HeistTarget, ItemRarity, Trials, UltimatumHint};
 use crate::util::number::leading_int;
 
-/// `Map Tier: 16`, and the completion reward a Valdo's map pays out.
 pub fn parse_map(section: &[String], state: &mut ParserState) -> ParseOutcome {
     let Some(first) = section.first() else {
         return ParseOutcome::SectionSkipped;
@@ -22,8 +15,6 @@ pub fn parse_map(section: &[String], state: &mut ParserState) -> ParseOutcome {
         return ParseOutcome::SectionParsed;
     }
 
-    // A Valdo's map. It is bought for the reward and not for its own
-    // modifiers, so the reward has to be read before anything prices it.
     for line in section {
         if let Some(reward) = line.strip_prefix(cs::MAP_COMPLETION_REWARD) {
             state.item.map_completion_reward = Some(reward.to_string());
@@ -35,17 +26,6 @@ pub fn parse_map(section: &[String], state: &mut ParserState) -> ParseOutcome {
     ParseOutcome::SectionSkipped
 }
 
-/// The PoE2 waystone block.
-///
-/// A waystone prints no tier of its own. The tier comes from the base, which
-/// is why this stage needs the database lookup to have run already.
-///
-/// # A note that was wrong
-///
-/// This used to say `WAYSTONE_MONSTER_RARITY` and `WAYSTONE_EFFECTIVENESS`
-/// were absent from the reference's English data file and so not worth
-/// porting. They are in it, at lines 98 and 99, and a waystone printing either
-/// had that number silently dropped.
 pub fn parse_waystone(section: &[String], state: &mut ParserState) -> ParseOutcome {
     let Some(first) = section.first() else {
         return ParseOutcome::SectionSkipped;
@@ -86,10 +66,6 @@ pub fn parse_waystone(section: &[String], state: &mut ParserState) -> ParseOutco
     ParseOutcome::SectionParsed
 }
 
-/// Three categories that only their help text identifies.
-///
-/// A captured beast, a metamorph sample and a voidstone all print a rarity the
-/// parser cannot use. The help line is the only reliable signal.
 pub fn parse_category_by_help_text(section: &[String], state: &mut ParserState) -> ParseOutcome {
     let Some(first) = section.first() else {
         return ParseOutcome::SectionSkipped;
@@ -107,10 +83,6 @@ pub fn parse_category_by_help_text(section: &[String], state: &mut ParserState) 
     ParseOutcome::SectionParsed
 }
 
-/// Read an area level anywhere in the section.
-///
-/// Not a stage. Three stages need it and each claims its section for its own
-/// reasons.
 fn read_area_level(section: &[String], state: &mut ParserState) {
     for line in section {
         if let Some(rest) = line.strip_prefix(cs::AREA_LEVEL) {
@@ -121,11 +93,6 @@ fn read_area_level(section: &[String], state: &mut ParserState) {
     }
 }
 
-/// `Area Level: 83` on the four bases that carry one.
-///
-/// Gated on the base name. Any other item printing an area level is printing a
-/// modifier, and reading it as the item's own level would put a filter on the
-/// query that the item does not have.
 pub fn parse_area_level(section: &[String], state: &mut ParserState) -> ParseOutcome {
     let applies = matches!(
         state.item.info.reference_name.as_str(),
@@ -145,7 +112,6 @@ pub fn parse_area_level(section: &[String], state: &mut ParserState) -> ParseOut
     ParseOutcome::SectionSkipped
 }
 
-/// The heist blueprint block.
 pub fn parse_heist_blueprint(section: &[String], state: &mut ParserState) -> ParseOutcome {
     if state.item.category != Some(ItemCategory::HeistBlueprint) {
         return ParseOutcome::ParserSkipped;
@@ -178,10 +144,6 @@ pub fn parse_heist_blueprint(section: &[String], state: &mut ParserState) -> Par
     ParseOutcome::SectionParsed
 }
 
-/// The trial block on a Djinn Barya or an Inscribed Ultimatum.
-///
-/// The ultimatum hint only applies to the Inscribed Ultimatum. A Djinn Barya
-/// can print the same words as part of a modifier.
 pub fn parse_trials(section: &[String], state: &mut ParserState) -> ParseOutcome {
     let name = state.item.info.reference_name.as_str();
     let is_ultimatum = name == "Inscribed Ultimatum";
@@ -217,11 +179,6 @@ pub fn parse_trials(section: &[String], state: &mut ParserState) -> ParseOutcome
     ParseOutcome::SectionParsed
 }
 
-/// Whether a name prefix such as `Superior ` may be stripped.
-///
-/// A quality prefix is only part of the name while the item is unidentified or
-/// normal. On an identified magic or rare item the same word is part of the
-/// rolled name and stripping it would break the lookup.
 fn name_prefix_is_strippable(state: &ParserState) -> bool {
     match state.item.rarity {
         Some(ItemRarity::Normal) => true,
@@ -232,26 +189,18 @@ fn name_prefix_is_strippable(state: &ParserState) -> bool {
     }
 }
 
-/// Strip the `Superior ` prefix off the name.
 pub fn parse_superior(state: &mut ParserState) -> Result<(), ParseError> {
     strip_name_prefix(state, cs::ITEM_SUPERIOR);
 
     Ok(())
 }
 
-/// Strip the `Exceptional ` prefix off the name.
 pub fn parse_exceptional(state: &mut ParserState) -> Result<(), ParseError> {
     strip_name_prefix(state, cs::ITEM_EXCEPTIONAL);
 
     Ok(())
 }
 
-/// Do nothing, on purpose.
-///
-/// The reference keeps `parseRuneforged` in its pipeline with the body
-/// commented out. A runeforged item is a different base type, so stripping the
-/// prefix would look the wrong item up. Kept as a named stage so the pipeline
-/// still reads like the reference and nobody re adds the strip.
 pub fn parse_runeforged(_state: &mut ParserState) -> Result<(), ParseError> {
     Ok(())
 }
@@ -274,7 +223,6 @@ mod tests {
         v.iter().map(|s| s.to_string()).collect()
     }
 
-    /// A normal rarity item whose name plate line is `name`.
     fn normal(name: &str) -> ParserState<'static> {
         let mut s = ParserState {
             name: name.into(),
@@ -318,15 +266,10 @@ mod tests {
 
     #[test]
     fn a_waystone_takes_its_tier_from_the_base() {
-        // A waystone prints no tier. Reading one off the item would leave every
-        // waystone at tier zero.
         let mut s = ParserState::default();
         s.item.info.map_tier = Some(15);
 
         let out = parse_waystone(
-            // PoE2 prints "Pack Size", not "Monster Pack Size". This fixture
-            // used the PoE1 spelling, which matched the constant that was
-            // wrong, so the test agreed with the bug.
             &sec(&[
                 "Revives Available: 6",
                 "Pack Size: +20%",
@@ -352,8 +295,6 @@ mod tests {
 
     #[test]
     fn a_waystone_with_no_base_tier_is_skipped() {
-        // Without the base tier the block cannot be trusted, so it is left for
-        // another stage rather than half filled.
         let mut s = ParserState::default();
 
         assert_eq!(
@@ -442,8 +383,6 @@ mod tests {
 
     #[test]
     fn any_other_base_skips_the_area_level_stage() {
-        // A modifier can print "Area Level" text. Reading it as the item's own
-        // level would put a filter on the query the item does not have.
         let mut s = named("Spine Bow");
 
         assert_eq!(
@@ -565,8 +504,6 @@ mod tests {
 
     #[test]
     fn a_djinn_barya_reads_no_hint() {
-        // The same words can appear in a Barya modifier. Reading one as a hint
-        // would add a filter the item does not carry.
         let mut s = named("Djinn Barya");
 
         parse_trials(
@@ -625,8 +562,6 @@ mod tests {
 
     #[test]
     fn superior_is_kept_on_an_identified_rare() {
-        // On an identified rare the word belongs to the rolled name and
-        // stripping it would look up an item that does not exist.
         let mut s = ParserState {
             name: "Superior Doom Crown".into(),
             ..ParserState::default()
@@ -670,9 +605,6 @@ mod tests {
 
     #[test]
     fn runeforged_strips_nothing() {
-        // A runeforged item is a different base type. Stripping the prefix
-        // would look up the wrong item. The reference commented this out and
-        // so do we.
         let mut s = normal("Runeforged Iron Hat");
 
         parse_runeforged(&mut s).unwrap();

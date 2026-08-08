@@ -1,14 +1,3 @@
-//! The ordered stage lists.
-//!
-//! Ported from the `parsers` array in `renderer/src/parser/Parser.ts`.
-//!
-//! Order is the whole design. A stage that runs early claims its section
-//! before a hungrier stage can, and the modifier stages run last so they only
-//! ever see what nothing else wanted.
-//!
-//! 35 of the 50 reference stages are shared. Those live in `shared`. The two
-//! builders here differ only in which game specific stages they splice in.
-
 use crate::types::game::GameVersion;
 
 use super::poe1::legacy;
@@ -17,7 +6,6 @@ use super::shared::{
 };
 use super::Stage;
 
-/// Build the stage list for a game.
 pub fn pipeline(game: GameVersion) -> Vec<Stage> {
     match game {
         GameVersion::Poe1 => poe1(),
@@ -25,10 +13,6 @@ pub fn pipeline(game: GameVersion) -> Vec<Stage> {
     }
 }
 
-/// Stages every item goes through before the base is known.
-///
-/// These run first because the later stages branch on the category and the
-/// base name, and neither is known until the name plate has been cleaned up.
 fn preamble() -> Vec<Stage> {
     vec![
         Stage::Section(flags::parse_unidentified),
@@ -37,15 +21,11 @@ fn preamble() -> Vec<Stage> {
         Stage::Virtual(content::parse_runeforged),
         Stage::Section(flags::parse_synthesised),
         Stage::Section(content::parse_category_by_help_text),
-        // The name has to be normalised before the lookup, and the lookup has
-        // to run before any stage that branches on the category or the base
-        // name. Everything in `body` does.
         Stage::Virtual(database::normalize_name),
         Stage::Virtual(database::find_in_database),
     ]
 }
 
-/// Stages both games share, after the base is known.
 fn body() -> Vec<Stage> {
     vec![
         Stage::Section(levels::parse_item_level),
@@ -71,19 +51,6 @@ fn body() -> Vec<Stage> {
     ]
 }
 
-/// Five occurrences of the modifier stage.
-///
-/// One per modifier block the game can print: enchant, rune, implicit,
-/// granted skill and explicit. Each occurrence claims a different section,
-/// because a section is consumed at most once.
-/// Stages for named bases whose modifier block breaks the normal rules.
-///
-/// These run before the general modifier stages so a named base's odd block is
-/// claimed before the general reader can misread it. Each is gated on the base
-/// name, so an ordinary item passes straight through.
-///
-/// The logbook stage appears three times because a logbook carries three
-/// areas, each its own section.
 fn special_base_stages() -> Vec<Stage> {
     vec![
         Stage::Section(special::parse_mirrored_tablet),
@@ -95,13 +62,10 @@ fn special_base_stages() -> Vec<Stage> {
     ]
 }
 
-/// Stages that read what the modifier stages produced.
 fn derived_stages() -> Vec<Stage> {
     vec![
         Stage::Virtual(special::parse_fractured),
         Stage::Virtual(special::parse_blighted_map),
-        // The variant is chosen after the modifiers are read, because the
-        // implicit is what tells two bases of one name apart.
         Stage::Virtual(variant::pick_correct_variant),
         Stage::Virtual(special::calc_base_percentile),
     ]
@@ -113,22 +77,12 @@ fn modifier_stages() -> Vec<Stage> {
         .collect()
 }
 
-/// The PoE2 modifier stages.
-///
-/// PoE2 prints every explicit in one unmarked section, so each line there is
-/// its own modifier. The shared reader would call the whole section one
-/// modifier and attribute six explicits to the first of them.
 fn modifier_stages_poe2() -> Vec<Stage> {
     (0..5)
         .map(|_| Stage::Section(modifiers::parse_modifiers_poe2))
         .collect()
 }
 
-/// The PoE1 pipeline.
-///
-/// The nine legacy stages read lines PoE2 never prints. Exiled Exchange 2
-/// dropped all nine, so porting only that reference left PoE1 unable to read
-/// a heist contract, a split item, a tincture or a map's tier suffix.
 fn poe1() -> Vec<Stage> {
     let mut out = preamble_poe1();
     out.extend(body());
@@ -149,12 +103,6 @@ fn poe1() -> Vec<Stage> {
     out
 }
 
-/// The preamble with the three PoE1 name plate stages in place.
-///
-/// Written out rather than spliced into the shared list, because the order is
-/// the whole point and a reader has to be able to see it. Foulborn and
-/// Vestigial run before anything reads the name, and the tier suffix comes off
-/// before the database lookup, so the lookup sees the name the data file uses.
 fn preamble_poe1() -> Vec<Stage> {
     vec![
         Stage::Section(flags::parse_unidentified),
@@ -171,10 +119,6 @@ fn preamble_poe1() -> Vec<Stage> {
     ]
 }
 
-/// The PoE2 pipeline.
-///
-/// PoE2 adds the caster, jewellery, charm slot, spirit, waystone and trial
-/// stages. Each of those reads a line PoE1 never prints.
 fn poe2() -> Vec<Stage> {
     let mut out = preamble();
 
@@ -191,15 +135,12 @@ fn poe2() -> Vec<Stage> {
         Stage::Section(content::parse_waystone),
         Stage::Section(content::parse_trials),
         Stage::Section(misc::parse_timelost_radius),
-        // Runes are PoE2 only. The socket line has to be claimed before the
-        // modifier stages, or it is read as an unknown modifier.
         Stage::Section(sockets::parse_augment_sockets),
     ]);
 
     out.extend(special_base_stages());
     out.extend(modifier_stages_poe2());
 
-    // These read what the modifier stages produced, so they run last.
     out.extend(derived_stages());
     out.extend([
         Stage::Virtual(sockets::apply_augment_sockets),
@@ -228,8 +169,6 @@ mod tests {
 
     #[test]
     fn poe2_has_more_stages_than_poe1() {
-        // PoE2 prints lines PoE1 never does. If this ever inverts, a stage was
-        // spliced into the wrong builder.
         assert!(pipeline(GameVersion::Poe2).len() > pipeline(GameVersion::Poe1).len());
     }
 
@@ -296,8 +235,6 @@ mod tests {
 
     #[test]
     fn an_unidentified_superior_base_loses_its_prefix() {
-        // parse_unidentified has to run before parse_superior, or the prefix
-        // is kept and the database lookup misses.
         let item_text = text(&[
             "Item Class: Helmets",
             "Rarity: Rare",
@@ -348,8 +285,6 @@ mod tests {
 
     #[test]
     fn a_poe2_sceptre_consumes_its_spirit_section() {
-        // Without parse_spirit that section would survive as an unparsed
-        // section. This proves the PoE2 builder wires it in.
         let item = run(
             &text(&[
                 "Item Class: Sceptres",
@@ -438,8 +373,6 @@ mod tests {
         .unwrap();
 
         assert_eq!(item.rarity, Some(ItemRarity::Unique));
-        // Read, not thrown away. The reference reads them and asserts it
-        // does, and whether to filter on them is the filter layer's call.
         assert_eq!(item.armour.ar, Some(500.0));
         assert!(item.is_corrupted);
     }

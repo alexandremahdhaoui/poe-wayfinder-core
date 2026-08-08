@@ -1,12 +1,3 @@
-//! What kind of thing an item is.
-//!
-//! Ported from `renderer/src/parser/meta.ts`.
-//!
-//! The string form is the trade site's spelling and not ours. Several are odd.
-//! `Tablet` is `TowerAugment`. `UncutGem` is `UncutSkillGem`. `Wombgift` is
-//! `BrequelFruit`. Those are the values the trade API accepts, so they stay.
-
-/// Every item category the parser recognises.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ItemCategory {
     Unknown,
@@ -76,30 +67,10 @@ pub enum ItemCategory {
     Wombgift,
 }
 
-/// What the game's own item class line means.
-///
-/// Ported from the class names the game prints, checked against the classes in
-/// the upstream fixture set.
-///
-/// # Why this exists alongside the data file
-///
-/// The trade API groups items coarsely. It says `weapon` and `armour`, not
-/// `bow` and `boots`, so the category we build from it is absent for most
-/// bases: 810 of 3578 on the last data build.
-///
-/// The game prints the exact class on every single item. Reading it here gives
-/// a category for items the data file cannot cover, which is what makes the
-/// category filter work on a bow at all.
-///
-/// The data file still wins where it has an answer. It knows things the class
-/// line cannot express, such as which jewel is a cluster jewel.
 pub fn from_item_class(class: &str) -> Option<ItemCategory> {
     use ItemCategory::*;
 
-    // Plural, as the game writes them. A singular spelling here silently
-    // matches nothing, which is the failure this whole map exists to fix.
     Some(match class.trim() {
-        // One handed
         "Claws" => Claw,
         "Daggers" => Dagger,
         "Rune Daggers" => RuneDagger,
@@ -111,7 +82,6 @@ pub fn from_item_class(class: &str) -> Option<ItemCategory> {
         "Spears" => Spear,
         "Flails" => Flail,
 
-        // Two handed
         "Bows" => Bow,
         "Staves" => Staff,
         "Two Hand Swords" => TwoHandedSword,
@@ -121,26 +91,22 @@ pub fn from_item_class(class: &str) -> Option<ItemCategory> {
         "Crossbows" => Crossbow,
         "Fishing Rods" => FishingRod,
 
-        // Offhand
         "Quivers" => Quiver,
         "Shields" => Shield,
         "Foci" => Focus,
         "Bucklers" => Buckler,
 
-        // Jewellery
         "Amulets" => Amulet,
         "Rings" => Ring,
         "Belts" => Belt,
         "Trinkets" => Trinket,
         "Talismans" => Talisman,
 
-        // Armour
         "Body Armours" => BodyArmour,
         "Helmets" => Helmet,
         "Gloves" => Gloves,
         "Boots" => Boots,
 
-        // Consumables and the rest
         "Life Flasks" | "Mana Flasks" | "Hybrid Flasks" | "Utility Flasks" => Flask,
         "Charms" => Charm,
         "Jewels" => Jewel,
@@ -151,20 +117,14 @@ pub fn from_item_class(class: &str) -> Option<ItemCategory> {
         "Relics" => SanctumRelic,
         "Tablet" | "Tablets" => Tablet,
 
-        // A gem class this build does not split further. All three are gems to
-        // the trade site.
         "Skill Gems" | "Support Gems" | "Uncut Skill Gems" | "Uncut Support Gems"
         | "Uncut Spirit Gems" => Gem,
 
-        // An unknown class is reported as unknown rather than guessed. A wrong
-        // category sends the search to the wrong part of the site and returns
-        // nothing, which reads as the item being unpriceable.
         _ => return None,
     })
 }
 
 impl ItemCategory {
-    /// The trade site spelling.
     pub fn as_str(self) -> &'static str {
         use ItemCategory::*;
 
@@ -237,15 +197,10 @@ impl ItemCategory {
         }
     }
 
-    /// Parse the trade site spelling.
-    ///
-    /// Data files carry these strings, so an unknown one means the data is
-    /// newer than this build. The caller decides whether that is fatal.
     pub fn parse(s: &str) -> Option<Self> {
         ALL.iter().copied().find(|c| c.as_str() == s)
     }
 
-    /// One handed melee weapon.
     pub fn is_one_handed_melee(self) -> bool {
         use ItemCategory::*;
 
@@ -262,14 +217,12 @@ impl ItemCategory {
         )
     }
 
-    /// One handed weapon, melee or caster.
     pub fn is_one_handed(self) -> bool {
         use ItemCategory::*;
 
         self.is_one_handed_melee() || matches!(self, Sceptre | Wand)
     }
 
-    /// Two handed melee weapon.
     pub fn is_two_handed_melee(self) -> bool {
         use ItemCategory::*;
 
@@ -279,21 +232,18 @@ impl ItemCategory {
         )
     }
 
-    /// Martial weapon. Bows and crossbows plus every melee weapon.
     pub fn is_martial_weapon(self) -> bool {
         use ItemCategory::*;
 
         self.is_one_handed_melee() || self.is_two_handed_melee() || matches!(self, Bow | Crossbow)
     }
 
-    /// Any weapon.
     pub fn is_weapon(self) -> bool {
         use ItemCategory::*;
 
         self.is_one_handed() || self.is_martial_weapon() || matches!(self, Staff | FishingRod)
     }
 
-    /// Any armour piece.
     pub fn is_armour(self) -> bool {
         use ItemCategory::*;
 
@@ -303,39 +253,28 @@ impl ItemCategory {
         )
     }
 
-    /// Bases a catalyst can scale.
     pub fn is_ring_or_amulet(self) -> bool {
         matches!(self, ItemCategory::Ring | ItemCategory::Amulet)
     }
 
-    /// Rings, amulets, belts and trinkets.
-    ///
-    /// Quivers are excluded. The reference has that line commented out and the
-    /// trade site agrees.
     pub fn is_accessory(self) -> bool {
         use ItemCategory::*;
 
         matches!(self, Amulet | Belt | Ring | Trinket)
     }
 
-    /// Bases that can carry a real granted skill.
     pub fn grants_real_skill(self) -> bool {
         use ItemCategory::*;
 
         matches!(self, Staff | Wand | Sceptre)
     }
 
-    /// Bases that can carry any granted skill.
     pub fn grants_skill(self) -> bool {
         use ItemCategory::*;
 
         self.grants_real_skill() || matches!(self, Spear | Shield | Buckler)
     }
 
-    /// Gem categories.
-    ///
-    /// `UncutGem` is deliberately excluded, matching the reference. An uncut
-    /// gem is currency until it is cut.
     pub fn is_gem(self) -> bool {
         use ItemCategory::*;
 
@@ -343,7 +282,6 @@ impl ItemCategory {
     }
 }
 
-/// Every category, in declaration order.
 pub const ALL: [ItemCategory; 65] = {
     use ItemCategory::*;
 
@@ -444,8 +382,6 @@ mod tests {
 
     #[test]
     fn the_odd_trade_spellings_are_preserved() {
-        // Each of these looks like a typo and is not. The trade API only
-        // accepts these exact strings.
         assert_eq!(ItemCategory::Tablet.as_str(), "TowerAugment");
         assert_eq!(ItemCategory::UncutGem.as_str(), "UncutSkillGem");
         assert_eq!(ItemCategory::Wombgift.as_str(), "BrequelFruit");
@@ -484,8 +420,6 @@ mod tests {
 
     #[test]
     fn a_talisman_counts_as_a_two_handed_melee_weapon() {
-        // Surprising and correct. The reference puts Talisman in
-        // WEAPON_TWO_HANDED_MELEE.
         assert!(ItemCategory::Talisman.is_two_handed_melee());
         assert!(ItemCategory::Talisman.is_weapon());
     }
@@ -510,8 +444,6 @@ mod tests {
 
     #[test]
     fn a_quiver_is_not_an_accessory() {
-        // The reference comments Quiver out of ACCESSORY. The trade site
-        // agrees, so this is intentional and not an omission.
         assert!(!ItemCategory::Quiver.is_accessory());
 
         for c in [
@@ -526,7 +458,6 @@ mod tests {
 
     #[test]
     fn an_uncut_gem_is_not_a_gem() {
-        // An uncut gem trades as currency until it is cut.
         assert!(!ItemCategory::UncutGem.is_gem());
 
         for c in [

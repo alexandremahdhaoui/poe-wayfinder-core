@@ -1,55 +1,20 @@
-//! Reading modifier metadata out of item text.
-//!
-//! Ported from `renderer/src/parser/advanced-mod-desc.ts`.
-//!
-//! # Two ways the game tells you a modifier's type
-//!
-//! With Advanced Item Description off, the game appends a suffix to the stat
-//! line itself.
-//!
-//! ```text
-//! +25 to maximum Life (implicit)
-//! ```
-//!
-//! With it on, the game prints a metadata line in braces above the stat lines
-//! it describes.
-//!
-//! ```text
-//! {Prefix Modifier "Rotund" (Tier: 3) — Life}
-//! +25 to maximum Life
-//! ```
-//!
-//! Both forms are supported. The suffix form is the fallback, and it carries
-//! far less information, which is why the app should tell a user to turn
-//! Advanced Item Description on.
-
 use crate::types::client_strings as cs;
 use crate::types::modifier::{Generation, ModifierInfo, ModifierType};
 use crate::types::stat::ParsedStat;
 use crate::util::number::leading_float;
 
-/// The em dash the game uses to separate metadata fields.
-///
-/// U+2014 and not a hyphen. A hyphen here would never match and every tag
-/// would silently disappear.
 const FIELD_SEPARATOR: char = '\u{2014}';
 
-/// Whether a line is a metadata line rather than a stat line.
 pub fn is_mod_info_line(line: &str) -> bool {
     line.starts_with('{') && line.ends_with('}')
 }
 
-/// One modifier and the stat lines beneath it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupedMod {
     pub mod_line: String,
     pub stat_lines: Vec<String>,
 }
 
-/// Split a section into one group per metadata line.
-///
-/// Returns nothing when the first line is not a metadata line, because then
-/// the section is in the suffix form and this grouping does not apply.
 pub fn group_lines_by_mod(lines: &[String]) -> Vec<GroupedMod> {
     if lines.first().is_none_or(|l| !is_mod_info_line(l)) {
         return Vec::new();
@@ -71,7 +36,6 @@ pub fn group_lines_by_mod(lines: &[String]) -> Vec<GroupedMod> {
     out
 }
 
-/// Strip a suffix from every line that carries it.
 pub fn remove_lines_ending(lines: &[String], ending: &str) -> Vec<String> {
     lines
         .iter()
@@ -79,11 +43,6 @@ pub fn remove_lines_ending(lines: &[String], ending: &str) -> Vec<String> {
         .collect()
 }
 
-/// Work out a section's modifier type from its line suffixes.
-///
-/// The order matters and is the reference's. A line can only carry one suffix,
-/// but a section can mix types, and the first match wins for the whole
-/// section.
 pub fn parse_mod_type(lines: &[String]) -> (ModifierType, Vec<String>) {
     if lines
         .first()
@@ -92,8 +51,6 @@ pub fn parse_mod_type(lines: &[String]) -> (ModifierType, Vec<String>) {
         return (ModifierType::Veiled, lines.to_vec());
     }
 
-    // Checked in the reference's order. Explicit has no suffix and is the
-    // fallback.
     let ordered = [
         ModifierType::Scourge,
         ModifierType::Enchant,
@@ -118,11 +75,6 @@ pub fn parse_mod_type(lines: &[String]) -> (ModifierType, Vec<String>) {
     (ModifierType::Explicit, lines.to_vec())
 }
 
-/// Read one `{...}` metadata line.
-///
-/// `kind` is what the line suffixes already said. This function can override
-/// it, because the metadata line is more specific. A `Master Crafted` prefix
-/// on an otherwise explicit section makes the whole modifier crafted.
 pub fn parse_mod_info_line(line: &str, kind: ModifierType) -> ModifierInfo {
     let inner = line
         .strip_prefix('{')
@@ -147,9 +99,6 @@ pub fn parse_mod_info_line(line: &str, kind: ModifierType) -> ModifierInfo {
         read_head(head, &mut info);
     }
 
-    // The third field is always the roll increase. The second is the roll
-    // increase only when there is no third and it looks like one, otherwise it
-    // is the tag list.
     let incr_text = match (second, third) {
         (_, Some(third)) => Some(third),
         (Some(second), None) if parse_increased(second).is_some() => Some(second),
@@ -170,15 +119,6 @@ pub fn parse_mod_info_line(line: &str, kind: ModifierType) -> ModifierInfo {
     info
 }
 
-/// Read the first metadata field.
-///
-/// It holds the modifier's type word, then an optional quoted name, then an
-/// Take the crafted marker off a type word, in either game's spelling.
-///
-/// PoE2 prints `Crafted Prefix Modifier` and PoE1 prints
-/// `Master Crafted Prefix Modifier`. The longer one is tried first, because
-/// `Master Crafted` does not begin with `Crafted` and a single check for
-/// either spelling misses the other.
 fn strip_crafted(type_word: &str) -> Option<&str> {
     type_word
         .strip_prefix(cs::MASTER_CRAFTED_MODIFIER)
@@ -186,12 +126,9 @@ fn strip_crafted(type_word: &str) -> Option<&str> {
         .map(str::trim)
 }
 
-/// optional tier and rank.
 fn read_head(head: &str, info: &mut ModifierInfo) {
     let (type_word, rest) = split_type_word(head);
 
-    // A fractured or desecrated or crafted marker prefixes the type word and
-    // overrides the section's type. Fractured wins over the other two.
     let mut type_word = type_word;
 
     if let Some(stripped) = type_word.strip_prefix(cs::FRACTURED_MODIFIER) {
@@ -228,19 +165,12 @@ fn read_head(head: &str, info: &mut ModifierInfo) {
     info.rank = read_parenthesised(rest, "Rank");
 }
 
-/// Split the head into its type word and everything after it.
-///
-/// The type word ends at the first quote or opening parenthesis.
 fn split_type_word(head: &str) -> (&str, &str) {
     let end = head.find(['"', '(']).unwrap_or(head.len());
 
     (head[..end].trim(), &head[end..])
 }
 
-/// Read the quoted modifier name.
-///
-/// An empty quoted name reads as absent, matching the reference, because the
-/// game prints `""` when it has no name to give.
 fn read_quoted_name(head: &str) -> Option<String> {
     let start = head.find('"')? + 1;
     let end = start + head[start..].find('"')?;
@@ -249,7 +179,6 @@ fn read_quoted_name(head: &str) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
-/// Read `(Tier: 3)` or `(Rank: 2)`.
 fn read_parenthesised(text: &str, key: &str) -> Option<u32> {
     let needle = format!("({key}:");
     let start = text.find(&needle)? + needle.len();
@@ -258,17 +187,12 @@ fn read_parenthesised(text: &str, key: &str) -> Option<u32> {
     text[start..end].trim().parse().ok()
 }
 
-/// Read `20% Increased` into 20.
 fn parse_increased(text: &str) -> Option<f64> {
     let value = text.trim().strip_suffix("% Increased")?;
 
     leading_float(value)
 }
 
-/// Match an eldritch implicit head and return its rank.
-///
-/// The game prints `Eater of Worlds Implicit Modifier (Grand)`. The rank word
-/// is what matters and the ranks are ordered.
 fn eldritch_rank(head: &str) -> Option<u32> {
     let rest = head
         .strip_prefix("Eater of Worlds Implicit Modifier")
@@ -283,11 +207,6 @@ fn eldritch_rank(head: &str) -> Option<u32> {
         .map(|i| i as u32 + 1)
 }
 
-/// Apply a modifier's roll increase to a value.
-///
-/// Ported from `incrRoll`. Truncates rather than rounds, matching the game and
-/// the reference. Rounding here puts the client one point above what the trade
-/// site will match.
 pub fn incr_roll(value: f64, percent: f64, decimals: u32) -> f64 {
     let raised = value + (value * percent) / 100.0;
     let scale = 10f64.powi(decimals as i32);
@@ -295,25 +214,10 @@ pub fn incr_roll(value: f64, percent: f64, decimals: u32) -> f64 {
     (raised * scale).trunc() / scale
 }
 
-/// Rescale a stat's roll by the modifier's roll increase.
-///
-/// Ported from `applyIncr`. Returns nothing when there is nothing to apply, so
-/// the caller keeps the stat it already has rather than replacing it with an
-/// identical copy.
-///
-/// # Why a modifier can raise its own roll
-///
-/// An eldritch implicit prints its base roll and a separate "increased effect"
-/// line. The number the game shows is the two combined, so a filter built from
-/// the printed number alone searches for an item that does not exist.
-///
-/// An unscalable roll is left alone. Some rolls are flat counts the increase
-/// does not touch, and scaling those invents a value the item never had.
 pub fn apply_incr(info: &ModifierInfo, stat: &ParsedStat) -> Option<ParsedStat> {
     let increase = info.roll_incr?;
     let roll = stat.roll?;
 
-    // A zero increase scales nothing, so there is no new stat to hand back.
     if increase == 0.0 {
         return None;
     }
@@ -322,8 +226,6 @@ pub fn apply_incr(info: &ModifierInfo, stat: &ParsedStat) -> Option<ParsedStat> 
         return None;
     }
 
-    // A roll that carries decimals keeps two of them. Truncating it to a whole
-    // number loses the part the game actually shows.
     let decimals = if roll.decimals { 2 } else { 0 };
 
     let mut scaled = roll;
@@ -346,10 +248,6 @@ mod tests {
     fn lines(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
     }
-
-    // -----------------------------------------------------------------
-    // Grouping
-    // -----------------------------------------------------------------
 
     #[test]
     fn a_metadata_line_is_recognised_by_its_braces() {
@@ -376,7 +274,6 @@ mod tests {
 
     #[test]
     fn a_section_that_does_not_start_with_metadata_is_not_grouped() {
-        // That section is in the suffix form and this grouping does not apply.
         let got = group_lines_by_mod(&lines(&["+25 to maximum Life", "{Prefix Modifier}"]));
 
         assert!(got.is_empty());
@@ -395,10 +292,6 @@ mod tests {
         assert!(got[0].stat_lines.is_empty());
     }
 
-    // -----------------------------------------------------------------
-    // Suffix form
-    // -----------------------------------------------------------------
-
     #[test]
     fn a_line_suffix_names_the_type_and_is_stripped() {
         let (kind, out) = parse_mod_type(&lines(&["+25 to maximum Life (implicit)"]));
@@ -409,10 +302,6 @@ mod tests {
 
     #[test]
     fn both_games_spellings_of_the_crafted_marker_are_read() {
-        // PoE2 prints "Crafted Prefix Modifier" and PoE1 prints
-        // "Master Crafted Prefix Modifier". The constant held only the PoE1
-        // one, so every PoE2 crafted modifier read as an ordinary explicit and
-        // lost its generation with it.
         for line in [
             "{ Crafted Prefix Modifier \"Gentian\" (Tier: 6) — Mana }",
             "{ Master Crafted Prefix Modifier \"Gentian\" (Tier: 6) — Mana }",
@@ -427,9 +316,6 @@ mod tests {
 
     #[test]
     fn the_longer_crafted_spelling_is_tried_first() {
-        // "Master Crafted" does not begin with "Crafted", so checking the
-        // short one first leaves "Master " on the front of the type word and
-        // the generation never matches.
         let got = parse_mod_info_line(
             "{ Master Crafted Suffix Modifier \"of Mana\" (Tier: 1) }",
             ModifierType::Explicit,
@@ -473,7 +359,6 @@ mod tests {
         ]));
 
         assert_eq!(kind, ModifierType::Implicit);
-        // The unsuffixed line survives untouched.
         assert_eq!(out[1], "+30 to Dexterity");
     }
 
@@ -482,14 +367,11 @@ mod tests {
         let (kind, out) = parse_mod_type(&lines(&["Desecrated Prefix", "+25 to Life (implicit)"]));
 
         assert_eq!(kind, ModifierType::Veiled);
-        // Veiled keeps its lines verbatim, matching the reference.
         assert_eq!(out[1], "+25 to Life (implicit)");
     }
 
     #[test]
     fn the_first_matching_suffix_in_reference_order_wins() {
-        // Enchant is checked before implicit, so a section carrying both is
-        // an enchant. Reordering the list changes the answer.
         let (kind, _) = parse_mod_type(&lines(&["A (implicit)", "B (enchant)"]));
 
         assert_eq!(kind, ModifierType::Enchant);
@@ -501,10 +383,6 @@ mod tests {
 
         assert_eq!(got, vec!["A", "B"]);
     }
-
-    // -----------------------------------------------------------------
-    // Metadata line
-    // -----------------------------------------------------------------
 
     #[test]
     fn a_prefix_with_a_name_and_a_tier_is_read() {
@@ -544,8 +422,6 @@ mod tests {
 
     #[test]
     fn an_empty_quoted_name_reads_as_absent() {
-        // The game prints "" when it has no name to give. Keeping an empty
-        // string would make every lookup on the name fail oddly.
         let got = parse_mod_info_line("{Implicit Modifier \"\"}", ModifierType::Explicit);
 
         assert_eq!(got.name, None);
@@ -594,8 +470,6 @@ mod tests {
 
     #[test]
     fn a_corrupted_implicit_becomes_an_enchant() {
-        // Surprising and faithful. The trade site files corrupted implicits
-        // under the enchant namespace.
         let got = parse_mod_info_line("{Corruption Implicit Modifier}", ModifierType::Explicit);
 
         assert_eq!(got.kind, Some(ModifierType::Enchant));
@@ -633,8 +507,6 @@ mod tests {
 
     #[test]
     fn a_roll_increase_in_the_second_field_is_not_read_as_a_tag() {
-        // With no third field the second can be either. Reading an increase as
-        // a tag would lose the scaling and price the item as unscaled.
         let got = parse_mod_info_line(
             "{Prefix Modifier \"Rotund\" \u{2014} 20% Increased}",
             ModifierType::Explicit,
@@ -696,9 +568,6 @@ mod tests {
 
     #[test]
     fn a_line_without_braces_is_still_read() {
-        // group_lines_by_mod only hands over braced lines, but a caller could
-        // pass one already stripped and losing the whole modifier would be
-        // worse than reading it.
         let got = parse_mod_info_line("Prefix Modifier \"Rotund\"", ModifierType::Explicit);
 
         assert_eq!(got.name.as_deref(), Some("Rotund"));
@@ -713,14 +582,6 @@ mod tests {
         assert_eq!(got.name, None);
         assert!(got.tags.is_empty());
     }
-
-    // -----------------------------------------------------------------
-    // Roll scaling
-    // -----------------------------------------------------------------
-
-    // -----------------------------------------------------------------
-    // Applying a roll increase
-    // -----------------------------------------------------------------
 
     fn stat_with(roll: Option<StatRoll>) -> ParsedStat {
         ParsedStat {
@@ -748,8 +609,6 @@ mod tests {
 
     #[test]
     fn a_roll_increase_rescales_the_whole_range() {
-        // The number the game shows is the base and the increase combined, so
-        // a filter built from the base alone searches for a nonexistent item.
         let got = apply_incr(
             &info_with_incr(Some(20.0)),
             &stat_with(Some(roll_of(100.0))),
@@ -780,8 +639,6 @@ mod tests {
 
     #[test]
     fn a_modifier_with_no_increase_changes_nothing() {
-        // The caller keeps the stat it already has rather than replacing it
-        // with an identical copy.
         assert_eq!(
             apply_incr(&info_with_incr(None), &stat_with(Some(roll_of(100.0)))),
             None
@@ -798,8 +655,6 @@ mod tests {
 
     #[test]
     fn an_unscalable_roll_is_left_alone() {
-        // Some rolls are flat counts the increase does not touch, and scaling
-        // those invents a value the item never had.
         let mut roll = roll_of(100.0);
         roll.unscalable = true;
 
@@ -811,7 +666,6 @@ mod tests {
 
     #[test]
     fn a_decimal_roll_keeps_its_decimals() {
-        // Truncating to a whole number loses the part the game shows.
         let mut roll = roll_of(10.0);
         roll.decimals = true;
 
@@ -835,8 +689,6 @@ mod tests {
 
     #[test]
     fn scaling_keeps_the_stat_identity() {
-        // A rescaled stat is the same stat. Losing the reference would send a
-        // filter for nothing.
         let stat = stat_with(Some(roll_of(100.0)));
 
         let got = apply_incr(&info_with_incr(Some(20.0)), &stat).expect("an increase applies");
@@ -862,7 +714,6 @@ mod tests {
     fn a_zero_increase_leaves_the_value_where_it_was() {
         let got = apply_incr(&info_with_incr(Some(0.0)), &stat_with(Some(roll_of(100.0))));
 
-        // Zero is falsy in the reference, so it reports nothing to apply.
         assert_eq!(got, None);
     }
 
@@ -886,8 +737,6 @@ mod tests {
 
     #[test]
     fn scaling_truncates_and_does_not_round() {
-        // Rounding up puts the client one point above what the trade site
-        // matches, so the search silently returns nothing.
         assert_eq!(incr_roll(10.0, 15.0, 0), 11.0);
     }
 

@@ -1,30 +1,9 @@
-//! Parser stages that only PoE1 prints.
-//!
-//! Ported from `parseFoulborn`, `parseVestigial`, `parseMapTier`,
-//! `parseAccessory`, `parseMemoryStrandsNested`, `parseTincture`,
-//! `parseImbuedGem`, `parseHeistContract` and `parseSplit` in Awakened PoE
-//! Trade's `renderer/src/parser/Parser.ts`.
-//!
-//! # Why these were missing
-//!
-//! Exiled Exchange 2 is a PoE2 fork. None of these lines exist in PoE2, so its
-//! copy of the parser drops all nine stages. Porting only that reference
-//! measured 100 percent parity while PoE1 could not read a heist contract, a
-//! split item or a tincture.
-//!
-//! An unread line is not an error. It falls through to the modifier stages,
-//! fails to match a stat and lands in `unknown_modifiers`, where nobody looks.
-
 use crate::controller::parse::{ParseError, ParseOutcome, ParserState};
 use crate::types::category::ItemCategory;
 use crate::types::client_strings as cs;
 use crate::types::item::{HeistContract, ItemRarity};
 use crate::util::number::leading_int;
 
-/// Strip the `Foulborn ` prefix off a unique's name.
-///
-/// The prefix is a property of the item and not part of its name, so leaving
-/// it on makes the database lookup miss and the unique price as an unknown.
 pub fn parse_foulborn(state: &mut ParserState) -> Result<(), ParseError> {
     if state.item.rarity != Some(ItemRarity::Unique) || state.item.is_unidentified {
         return Ok(());
@@ -38,10 +17,6 @@ pub fn parse_foulborn(state: &mut ParserState) -> Result<(), ParseError> {
     Ok(())
 }
 
-/// Strip the `Vestigial ` prefix off a unique's base type.
-///
-/// The name, not the base, is what the reference checks for Foulborn. This one
-/// is on the base, because that is where the game prints it.
 pub fn parse_vestigial(state: &mut ParserState) -> Result<(), ParseError> {
     if state.item.rarity != Some(ItemRarity::Unique) {
         return Ok(());
@@ -59,11 +34,6 @@ pub fn parse_vestigial(state: &mut ParserState) -> Result<(), ParseError> {
     Ok(())
 }
 
-/// Read and remove a ` (Tier 5)` suffix from the name plate.
-///
-/// The current PoE1 atlas prints the tier inside the base name rather than on
-/// its own line. Leaving it on makes every tier of one map a different base to
-/// the database, so none of them resolve.
 pub fn parse_map_tier(state: &mut ParserState) -> Result<(), ParseError> {
     let target = match &state.base_type {
         Some(base) => base.clone(),
@@ -85,11 +55,6 @@ pub fn parse_map_tier(state: &mut ParserState) -> Result<(), ParseError> {
     Ok(())
 }
 
-/// Split a trailing ` (Tier N)` off a name.
-///
-/// Returns the name without it and the tier. Written as a scanner rather than
-/// a regex, like every other prefix and suffix in this parser, so there is no
-/// pattern to get subtly wrong.
 fn split_tier_suffix(text: &str) -> Option<(String, u32)> {
     let head = text.strip_suffix(')')?;
     let (before, digits) = head.rsplit_once(" (Tier ")?;
@@ -101,9 +66,6 @@ fn split_tier_suffix(text: &str) -> Option<(String, u32)> {
     Some((before.to_string(), digits.parse().ok()?))
 }
 
-/// The accessory section, which carries memory strands.
-///
-/// Consumes the section so the strand count is not read as a modifier.
 pub fn parse_accessory(section: &[String], state: &mut ParserState) -> ParseOutcome {
     if !matches!(
         state.item.category,
@@ -125,11 +87,6 @@ pub fn parse_accessory(section: &[String], state: &mut ParserState) -> ParseOutc
     ParseOutcome::SectionSkipped
 }
 
-/// The tincture section.
-///
-/// Exists to read the quality and consume the section. A tincture's buff lines
-/// are not modifiers and reading them as such fills the panel with stats that
-/// cannot be searched.
 pub fn parse_tincture(section: &[String], state: &mut ParserState) -> ParseOutcome {
     if state.item.category != Some(ItemCategory::Tincture) {
         return ParseOutcome::ParserSkipped;
@@ -139,8 +96,6 @@ pub fn parse_tincture(section: &[String], state: &mut ParserState) -> ParseOutco
 
     crate::controller::parse::shared::levels::parse_quality_nested(section, state);
 
-    // The section is only this one when the quality line was in it. Consuming
-    // it either way would eat the tincture's real modifier block.
     if state.item.quality != before {
         return ParseOutcome::SectionParsed;
     }
@@ -148,12 +103,6 @@ pub fn parse_tincture(section: &[String], state: &mut ParserState) -> ParseOutco
     ParseOutcome::SectionSkipped
 }
 
-/// A one line section on a gem that is a support stat.
-///
-/// An imbued gem carries a support the gem does not normally have, printed on
-/// its own with no modifier heading. The stage is gated on the section being
-/// one line and on that line matching a stat, so an ordinary gem passes
-/// through untouched.
 pub fn parse_imbued_gem(section: &[String], state: &mut ParserState) -> ParseOutcome {
     if !state.item.category.is_some_and(|c| c.is_gem()) {
         return ParseOutcome::ParserSkipped;
@@ -172,25 +121,17 @@ pub fn parse_imbued_gem(section: &[String], state: &mut ParserState) -> ParseOut
     ParseOutcome::SectionParsed
 }
 
-/// Whether the data file recognises a line as a stat.
 fn line_is_a_known_stat(line: &str, state: &ParserState) -> bool {
     crate::controller::stat_match::placeholder::candidates(line)
         .iter()
         .any(|c| state.data.stat_by_matcher(&c.template).is_some())
 }
 
-/// The heist contract section.
-///
-/// The job and its level are most of what a contract is worth. A buyer wants
-/// one job at one level, so a contract searched without them returns every
-/// contract in the game.
 pub fn parse_heist_contract(section: &[String], state: &mut ParserState) -> ParseOutcome {
     if state.item.category != Some(ItemCategory::HeistContract) {
         return ParseOutcome::ParserSkipped;
     }
 
-    // The area level line is what identifies this section. Without it this is
-    // some other section that happens to sit on a contract.
     let Some(area_level) = section.iter().find_map(|l| {
         l.strip_prefix(cs::AREA_LEVEL)
             .and_then(leading_int)
@@ -223,15 +164,7 @@ pub fn parse_heist_contract(section: &[String], state: &mut ParserState) -> Pars
     ParseOutcome::SectionParsed
 }
 
-/// Read `Requires Lockpicking (Level 3)` into its two halves.
-///
-/// The reference allows a trailing ` (unmet)`, which the game prints when the
-/// character cannot run the contract yet. The contract is worth the same
-/// either way, so the marker is dropped rather than recorded.
 fn read_job(line: &str) -> Option<(String, u32)> {
-    // Removed first so the rest of the read does not have to know where the
-    // game puts it. The reference's pattern allows it inside the level
-    // parentheses, and dropping it up front handles either placement.
     let line = line.replace(" (unmet)", "");
 
     let rest = line.strip_prefix(cs::HEIST_CONTRACT_REQUIRES)?;
@@ -239,9 +172,6 @@ fn read_job(line: &str) -> Option<(String, u32)> {
 
     let (job, level) = rest.trim_end().rsplit_once(" (Level ")?;
 
-    // Only the nine jobs the trade site indexes. Anything else is a different
-    // line that happens to read like this one, and inventing a tenth job would
-    // send a trade id that does not exist.
     let job = cs::HEIST_JOBS
         .iter()
         .find(|(name, _)| *name == job)
@@ -250,10 +180,6 @@ fn read_job(line: &str) -> Option<(String, u32)> {
     Some((job, level.parse().ok()?))
 }
 
-/// A one line section reading `Split`.
-///
-/// A split item cannot be split again, so the trade site indexes it and a
-/// buyer filters on it.
 pub fn parse_split(section: &[String], state: &mut ParserState) -> ParseOutcome {
     if section.len() != 1 || section[0] != cs::SPLIT {
         return ParseOutcome::SectionSkipped;
@@ -279,10 +205,6 @@ mod tests {
         lines.iter().map(|s| s.to_string()).collect()
     }
 
-    // -----------------------------------------------------------------
-    // Foulborn and Vestigial
-    // -----------------------------------------------------------------
-
     #[test]
     fn a_foulborn_unique_loses_the_prefix_from_its_name() {
         let mut s = state();
@@ -297,8 +219,6 @@ mod tests {
 
     #[test]
     fn an_unidentified_unique_keeps_the_foulborn_prefix() {
-        // Its name is not printed yet, so whatever is there is the base type
-        // and stripping a word off it breaks the lookup.
         let mut s = state();
         s.item.rarity = Some(ItemRarity::Unique);
         s.item.is_unidentified = true;
@@ -311,7 +231,6 @@ mod tests {
 
     #[test]
     fn a_rare_named_foulborn_something_keeps_its_name() {
-        // A rare's name is randomly generated and can start with any word.
         let mut s = state();
         s.item.rarity = Some(ItemRarity::Rare);
         s.name = "Foulborn Grasp".into();
@@ -346,14 +265,8 @@ mod tests {
         assert_eq!(s.name, "Vestigial Something");
     }
 
-    // -----------------------------------------------------------------
-    // Map tier suffix
-    // -----------------------------------------------------------------
-
     #[test]
     fn a_tier_suffix_is_read_and_removed() {
-        // Leaving it on makes every tier of one map a different base and none
-        // of them resolve.
         let mut s = state();
         s.name = "Toxic Map (Tier 14)".into();
 
@@ -389,8 +302,6 @@ mod tests {
 
     #[test]
     fn a_tier_suffix_with_no_number_is_not_a_tier() {
-        // A unique could be called anything. Reading "(Tier of Doom)" as a
-        // tier would strip a word off its name.
         let mut s = state();
         s.name = "Thing (Tier of Doom)".into();
 
@@ -410,10 +321,6 @@ mod tests {
         assert_eq!(s.name, "Map (Tier 3) of Doom");
     }
 
-    // -----------------------------------------------------------------
-    // Memory strands
-    // -----------------------------------------------------------------
-
     #[test]
     fn an_amulet_reports_its_memory_strands() {
         let mut s = state();
@@ -427,7 +334,6 @@ mod tests {
 
     #[test]
     fn a_strand_line_is_consumed_so_it_is_not_read_as_a_modifier() {
-        // An unconsumed line lands in unknown_modifiers, where nobody looks.
         let mut s = state();
         s.item.category = Some(ItemCategory::Ring);
 
@@ -458,10 +364,6 @@ mod tests {
             ParseOutcome::SectionSkipped
         );
     }
-
-    // -----------------------------------------------------------------
-    // Split
-    // -----------------------------------------------------------------
 
     #[test]
     fn a_split_item_says_so() {
@@ -495,10 +397,6 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------
-    // Heist contract
-    // -----------------------------------------------------------------
-
     fn contract() -> ParserState<'static> {
         let mut s = state();
         s.item.category = Some(ItemCategory::HeistContract);
@@ -525,9 +423,6 @@ mod tests {
 
     #[test]
     fn an_unmet_job_requirement_reads_the_same() {
-        // The game marks a job the character cannot do yet. The contract is
-        // worth the same either way. The reference's pattern puts the marker
-        // inside the level parentheses, so both placements are read.
         for line in [
             "Requires Deception (Level 4 (unmet))",
             "Requires Deception (Level 4) (unmet)",
@@ -544,8 +439,6 @@ mod tests {
 
     #[test]
     fn a_hyphenated_job_is_read() {
-        // Counter-Thaumaturgy is the one job whose name is not two plain
-        // words, and its trade id drops the hyphen.
         let mut s = contract();
 
         parse_heist_contract(
@@ -585,8 +478,6 @@ mod tests {
 
     #[test]
     fn a_section_with_no_area_level_is_not_the_contract_section() {
-        // Without it this is some other section that happens to sit on a
-        // contract, and consuming it would eat a real modifier block.
         let mut s = contract();
 
         let got = parse_heist_contract(&sec(&["Requires Agility (Level 3)"]), &mut s);
@@ -597,8 +488,6 @@ mod tests {
 
     #[test]
     fn a_job_the_trade_site_does_not_index_is_not_read() {
-        // Inventing a tenth job would send a trade id that does not exist and
-        // fail the whole query.
         let mut s = contract();
 
         parse_heist_contract(
@@ -640,7 +529,6 @@ mod tests {
 
     #[test]
     fn every_job_has_a_distinct_trade_id() {
-        // A copied id would search for the wrong job.
         let mut ids: Vec<&str> = cs::HEIST_JOBS.iter().map(|(_, id)| *id).collect();
         ids.sort_unstable();
         let before = ids.len();

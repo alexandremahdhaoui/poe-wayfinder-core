@@ -1,25 +1,5 @@
-//! The trade site query.
-//!
-//! Ported from the `TradeRequest` interface in
-//! `web/price-check/trade/pathofexile-trade.ts`.
-//!
-//! # Why this is a type and not a JSON blob
-//!
-//! The trade API rejects an unknown key outright and silently ignores a filter
-//! block whose inner shape is wrong. A wrong shape therefore returns a full
-//! page of results that ignored half the query, which looks like a working
-//! search and is not.
-//!
-//! The nesting is the API's and not ours. Every filter sits under
-//! `filters.<group>.filters.<name>`, which reads oddly and is what the server
-//! expects.
-
 use std::collections::BTreeMap;
 
-/// A numeric range filter.
-///
-/// Both ends are optional. A range with neither end set is meaningless and is
-/// dropped rather than sent.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Range {
     pub min: Option<f64>,
@@ -27,7 +7,6 @@ pub struct Range {
 }
 
 impl Range {
-    /// A range with only a floor.
     pub fn at_least(min: f64) -> Self {
         Self {
             min: Some(min),
@@ -35,7 +14,6 @@ impl Range {
         }
     }
 
-    /// A range with only a ceiling.
     pub fn at_most(max: f64) -> Self {
         Self {
             min: None,
@@ -43,7 +21,6 @@ impl Range {
         }
     }
 
-    /// A range pinned to one value.
     pub fn exactly(value: f64) -> Self {
         Self {
             min: Some(value),
@@ -51,19 +28,15 @@ impl Range {
         }
     }
 
-    /// Whether the range constrains anything.
     pub fn is_empty(&self) -> bool {
         self.min.is_none() && self.max.is_none()
     }
 }
 
-/// Which listings to include.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Status {
-    /// Sellers who are online now.
     #[default]
     Online,
-    /// Every listing, including offline sellers.
     Any,
 }
 
@@ -76,17 +49,12 @@ impl Status {
     }
 }
 
-/// How a group of stat filters combines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StatGroupKind {
-    /// Every filter in the group must match.
     #[default]
     And,
-    /// At least `value` of them must match.
     Count,
-    /// None of them may match.
     Not,
-    /// Match if present, ignore if not.
     If,
 }
 
@@ -101,30 +69,16 @@ impl StatGroupKind {
     }
 }
 
-/// One stat filter.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatFilter {
-    /// The trade stat id, such as `explicit.stat_3299347043`.
     pub id: String,
     pub range: Range,
-    /// A fixed option rather than a range.
     pub option: Option<f64>,
-    /// Sent but not applied.
-    ///
-    /// A disabled filter still travels so the trade site's own UI shows it
-    /// greyed out when the user opens the link.
     pub disabled: bool,
-    /// Never shown and never sent.
-    ///
-    /// A filter can be built and still be wrong to offer. A corrupted item's
-    /// implicit cannot be changed, so filtering on it narrows the search to
-    /// items identical to the one in hand. It stays in the list so the code
-    /// that groups filters still sees it, and it stays out of the UI.
     pub hidden: bool,
 }
 
 impl StatFilter {
-    /// A filter on a range.
     pub fn range(id: &str, range: Range) -> Self {
         Self {
             id: id.to_string(),
@@ -136,18 +90,15 @@ impl StatFilter {
     }
 }
 
-/// A group of stat filters.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatGroup {
     pub kind: StatGroupKind,
-    /// How many must match, for a count group.
     pub value: Range,
     pub filters: Vec<StatFilter>,
     pub disabled: bool,
 }
 
 impl StatGroup {
-    /// A group where every filter must match.
     pub fn all(filters: Vec<StatFilter>) -> Self {
         Self {
             kind: StatGroupKind::And,
@@ -158,43 +109,30 @@ impl StatGroup {
     }
 }
 
-/// Filters on what kind of item this is.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TypeFilters {
-    /// `nonunique` or `uniquefoil`.
     pub rarity: Option<String>,
-    /// The trade category id, such as `weapon.bow`.
     pub category: Option<String>,
     pub ilvl: Range,
     pub quality: Range,
 }
 
-/// Filters on a weapon or armour piece's numbers.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct EquipmentFilters {
-    /// Attacks per second.
     pub aps: Range,
-    /// Armour rating.
     pub ar: Range,
     pub block: Range,
     pub crit: Range,
-    /// Damage per second.
     pub dps: Range,
-    /// Elemental damage per second.
     pub edps: Range,
-    /// Energy shield.
     pub es: Range,
-    /// Evasion rating.
     pub ev: Range,
-    /// Physical damage per second.
     pub pdps: Range,
-    /// Rune and soul core sockets. Still called rune on the trade site.
     pub rune_sockets: Range,
     pub spirit: Range,
     pub reload_time: Range,
 }
 
-/// Filters on attribute requirements.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ReqFilters {
     pub lvl: Range,
@@ -203,7 +141,6 @@ pub struct ReqFilters {
     pub int: Range,
 }
 
-/// Filters on a map or waystone.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MapFilters {
     pub map_tier: Range,
@@ -211,21 +148,13 @@ pub struct MapFilters {
     pub map_packsize: Range,
     pub map_magic_monsters: Range,
     pub map_rare_monsters: Range,
-    /// Waystone drop chance.
     pub map_bonus: Range,
-    /// Increased item rarity.
     pub map_iir: Range,
     pub ultimatum_hint: Option<String>,
 }
 
-/// A tri state boolean filter.
-///
-/// Absent means do not filter. `Some(true)` means require it. `Some(false)`
-/// means exclude it. Sending false where absent was meant excludes every item
-/// that has the property, which is a very different search.
 pub type Flag = Option<bool>;
 
-/// Filters that fit nowhere else.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MiscFilters {
     pub alternate_art: Flag,
@@ -242,17 +171,13 @@ pub struct MiscFilters {
     pub fractured_item: Flag,
 }
 
-/// Filters on the listing rather than the item.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TradeFilters {
-    /// Fold several listings by one seller into one row.
     pub collapse: Flag,
-    /// How recently the listing was indexed.
     pub indexed: Option<String>,
     pub price: Range,
 }
 
-/// Every filter group.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Filters {
     pub type_filters: TypeFilters,
@@ -263,17 +188,12 @@ pub struct Filters {
     pub trade_filters: TradeFilters,
 }
 
-/// A name or type constrained by a discriminator.
-///
-/// A Two-Stone Ring is fire and cold or fire and lightning. Sending the bare
-/// name searches for both, which prices the wrong item half the time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Discriminated {
     pub option: String,
     pub discriminator: String,
 }
 
-/// A name or type field, with or without a discriminator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NameField {
     Plain(String),
@@ -281,7 +201,6 @@ pub enum NameField {
 }
 
 impl NameField {
-    /// Build from a name and an optional discriminator.
     pub fn new(name: &str, discriminator: Option<&str>) -> Self {
         match discriminator {
             Some(d) => NameField::Discriminated(Discriminated {
@@ -292,7 +211,6 @@ impl NameField {
         }
     }
 
-    /// The name, whichever form this is.
     pub fn name(&self) -> &str {
         match self {
             NameField::Plain(n) => n,
@@ -301,23 +219,15 @@ impl NameField {
     }
 }
 
-/// One search.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TradeQuery {
     pub status: Status,
-    /// The unique's name. Absent on a rare.
     pub name: Option<NameField>,
-    /// The base type.
     pub type_name: Option<NameField>,
     pub stats: Vec<StatGroup>,
     pub filters: Filters,
 }
 
-/// The category ids the trade site uses.
-///
-/// Ported from `CATEGORY_TO_TRADE_ID`. These are the server's spellings and
-/// several do not follow from the category name. A guess here returns an
-/// empty result rather than an error.
 pub fn category_trade_ids() -> BTreeMap<&'static str, &'static str> {
     use crate::types::category::ItemCategory as C;
 
@@ -421,8 +331,6 @@ mod tests {
 
     #[test]
     fn the_default_status_is_online_sellers_only() {
-        // Defaulting to any returns listings from sellers who will never
-        // reply, which makes every price look lower than it is.
         assert_eq!(Status::default(), Status::Online);
         assert_eq!(Status::Online.as_str(), "online");
         assert_eq!(Status::Any.as_str(), "any");
@@ -460,8 +368,6 @@ mod tests {
 
     #[test]
     fn a_discriminated_name_keeps_both_halves() {
-        // A Two-Stone Ring is fire and cold or fire and lightning. Sending the
-        // bare name searches for both and prices the wrong one half the time.
         let n = NameField::new("Two-Stone Ring", Some("fire_cold"));
 
         assert_eq!(n.name(), "Two-Stone Ring");
@@ -476,8 +382,6 @@ mod tests {
 
     #[test]
     fn a_flag_distinguishes_absent_from_false() {
-        // Sending false where absent was meant excludes every item that has
-        // the property, which is a very different search.
         let absent: Flag = None;
         let excluded: Flag = Some(false);
 
@@ -512,8 +416,6 @@ mod tests {
 
     #[test]
     fn the_trade_ids_that_do_not_follow_from_the_name_are_preserved() {
-        // Each of these would be guessed wrong. A wrong id returns an empty
-        // result rather than an error.
         let ids = category_trade_ids();
 
         assert_eq!(
@@ -549,8 +451,6 @@ mod tests {
 
     #[test]
     fn a_category_with_no_trade_id_is_absent_rather_than_guessed() {
-        // Currency and divination cards trade by name and have no category
-        // filter. A guessed id would silently return nothing.
         let ids = category_trade_ids();
 
         assert_eq!(ids.get(ItemCategory::Currency.as_str()), None);

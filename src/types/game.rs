@@ -1,21 +1,10 @@
-//! Which game an item came from.
-
-/// The two supported games.
-///
-/// 35 of 50 parser stages are shared between them. The rest are game specific
-/// and the pipeline is assembled per game.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GameVersion {
-    /// Path of Exile 1. Trade API lives under `/api/trade/`.
     Poe1,
-    /// Path of Exile 2. Trade API lives under `/api/trade2/`.
     Poe2,
 }
 
 impl GameVersion {
-    /// The trade API path segment for this game.
-    ///
-    /// This is the only difference between the two trade APIs.
     pub fn trade_path(self) -> &'static str {
         match self {
             GameVersion::Poe1 => "trade",
@@ -23,7 +12,6 @@ impl GameVersion {
         }
     }
 
-    /// The config and log spelling of this game.
     pub fn as_str(self) -> &'static str {
         match self {
             GameVersion::Poe1 => "poe1",
@@ -31,10 +19,6 @@ impl GameVersion {
         }
     }
 
-    /// Parse the config spelling.
-    ///
-    /// Returns None for anything else so a typo in `--game` fails at startup
-    /// rather than silently parsing PoE2 rules against a PoE1 item.
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "poe1" => Some(GameVersion::Poe1),

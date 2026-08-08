@@ -1,5 +1,3 @@
-//! Internal models. Plain data only. No behaviour beyond small helpers.
-
 pub mod category;
 pub mod client_strings;
 pub mod game;

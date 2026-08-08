@@ -1,17 +1,3 @@
-//! The item text parser.
-//!
-//! Ported from `renderer/src/parser/Parser.ts`.
-//!
-//! The algorithm is a section consuming ordered pipeline.
-//!
-//! 1. Split the clipboard on lines equal to `--------`.
-//! 2. Lift the name plate out of section zero.
-//! 3. Run an ordered list of stages over the sections that remain.
-//!
-//! Two rules drive everything. A stage consumes at most one section. A section
-//! is consumed at most once. That is why the modifier stage appears five times
-//! in the real pipeline. Each occurrence eats a different modifier section.
-
 pub mod magic_name;
 pub mod nameplate;
 pub mod pipeline;
@@ -26,28 +12,17 @@ pub use nameplate::{parse_name_plate, NamePlate};
 pub use pipeline::pipeline;
 pub use sections::text_to_sections;
 
-/// What a stage did with a section.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParseOutcome {
-    /// The section is consumed and removed from the remaining list.
     SectionParsed,
-    /// Not this section. Try the stage against the next one.
     SectionSkipped,
-    /// This stage does not apply to this item at all. Move to the next stage.
     ParserSkipped,
 }
 
-/// Why parsing failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {
-    /// The text does not look like a copied item at all.
     NotAnItem,
-    /// The name plate was missing a line the parser needs.
     BadNamePlate,
-    /// The item was copied from a client in another language.
-    ///
-    /// The reference names the detected language. We support English only, so
-    /// naming it would only point at a setting that does not exist here.
     WrongLanguage,
 }
 
@@ -65,61 +40,30 @@ impl std::fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-/// One section consuming stage.
 pub type SectionStage = fn(&[String], &mut ParserState<'_>) -> ParseOutcome;
 
-/// One stage that reads no section.
-///
-/// The reference calls these virtual parsers. They run once, in pipeline
-/// order, and derive state from what earlier stages already set.
 pub type VirtualStage = fn(&mut ParserState<'_>) -> Result<(), ParseError>;
 
-/// A pipeline entry.
 pub enum Stage {
-    /// Consumes at most one section.
     Section(SectionStage),
-    /// Reads no section.
     Virtual(VirtualStage),
 }
 
-/// The item under construction.
-///
-/// Carries two fields the finished item does not. `name` and `base_type` are
-/// the raw name plate lines, and stages rewrite them before the database
-/// lookup runs.
 #[derive(Clone)]
 pub struct ParserState<'a> {
     pub item: ParsedItem,
-    /// Line 3 of the name plate. Always present.
     pub name: String,
-    /// Line 4 of the name plate. Absent on normal items and currency.
     pub base_type: Option<String>,
-    /// Which game this item came from.
-    ///
-    /// The data tables are per game and a PoE1 base looked up in the PoE2
-    /// table finds nothing.
     pub game: crate::types::game::GameVersion,
-    /// Bases that share this item's name.
-    ///
-    /// Filled by the database lookup when a name covers several variants. A
-    /// Two-Stone Ring is three different trade items and only the implicit
-    /// tells them apart.
     pub variants: Vec<(
         crate::types::item::BaseInfo,
         crate::controller::parse::shared::variant::Discriminator,
     )>,
-    /// The stat and item tables.
-    ///
-    /// Carried on the state rather than passed to every stage, because only
-    /// two of the fifty stages need it and threading it through the other
-    /// forty eight would be noise.
     pub data: &'a dyn GameData,
 }
 
 impl std::fmt::Debug for ParserState<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // The data tables hold thousands of records and are never what a
-        // reader wants to see in a failure message.
         f.debug_struct("ParserState")
             .field("item", &self.item)
             .field("name", &self.name)
@@ -142,10 +86,6 @@ impl Default for ParserState<'_> {
     }
 }
 
-/// Parse clipboard text for a game.
-///
-/// The one call the rest of the project needs. It picks the pipeline and runs
-/// it, so no caller has to know a pipeline exists.
 pub fn parse_clipboard(
     clipboard: &str,
     game: crate::types::game::GameVersion,
@@ -154,10 +94,6 @@ pub fn parse_clipboard(
     run(clipboard, &pipeline(game), data, game)
 }
 
-/// Run a pipeline over clipboard text.
-///
-/// The section list shrinks as stages consume from it, so a later stage never
-/// sees a section an earlier stage already claimed.
 pub fn run(
     clipboard: &str,
     pipeline: &[Stage],
@@ -170,8 +106,6 @@ pub fn run(
         return Err(ParseError::NotAnItem);
     }
 
-    // "You cannot use this item" sits inside the name plate and shifts every
-    // line after it. Lift it out before the name plate is read.
     hoist_cannot_use_item(&mut sections);
 
     let plate = parse_name_plate(&sections[0])?;
@@ -214,11 +148,6 @@ pub fn run(
     Ok(state.item)
 }
 
-/// Move the "cannot use this item" line out of the name plate.
-///
-/// The game prints it as the third line of section zero. Everything the name
-/// plate parser expects then sits one line late. The reference drops the line
-/// and merges the rest of section zero into section one.
 fn hoist_cannot_use_item(sections: &mut Vec<Vec<String>>) {
     use crate::types::client_strings::CANNOT_USE_ITEM;
 
@@ -330,16 +259,12 @@ mod tests {
         )
         .unwrap();
 
-        // bail_out gave up on the first section and consumed nothing, so both
-        // sections are still on offer.
         assert_eq!(item.item_level, Some(2));
         assert!(item.is_mirrored);
     }
 
     #[test]
     fn the_same_stage_twice_eats_two_sections() {
-        // This is why the modifier stage appears five times in the real
-        // pipeline. Repetition is how it reaches every modifier section.
         let pipeline = [
             Stage::Section(eat_first),
             Stage::Section(eat_first),
@@ -404,8 +329,6 @@ mod tests {
     #[test]
     fn a_bad_name_plate_aborts_before_any_stage_runs() {
         assert_eq!(
-            // Not "Rarity: ..." on its own: that is a meta gem, which is
-            // valid. This is text with no name plate shape at all.
             run(
                 "hello\nworld",
                 &[],
@@ -447,8 +370,6 @@ mod tests {
 
         let item = run(&text, &[], &NO_DATA, crate::types::game::GameVersion::Poe2).unwrap();
 
-        // Without the hoist the name plate would read CANNOT_USE as the item
-        // name and every later lookup would miss.
         assert_eq!(item.rarity, Some(ItemRarity::Rare));
     }
 
@@ -491,7 +412,6 @@ mod tests {
 
     #[test]
     fn the_hoist_does_nothing_when_there_is_no_second_section() {
-        // Merging forward with nothing to merge into would drop every line.
         let text = ["Item Class: Rings", "Rarity: Rare", CANNOT_USE].join("\n");
 
         let mut sections = text_to_sections(&text);

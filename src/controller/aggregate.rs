@@ -1,59 +1,23 @@
-//! Summing one stat across every modifier that grants it.
-//!
-//! Ported from `sumStatsByModType` and `statSourcesTotal` in
-//! `renderer/src/parser/modifiers.ts`.
-//!
-//! # Why this exists
-//!
-//! An item can grant the same stat from three modifiers at once. A ring with
-//! `+20 to maximum Life` as a prefix, `+15 to maximum Life` from a rune and
-//! `+10 to maximum Life` as an implicit has 45 life, and that total is what a
-//! buyer searches for.
-//!
-//! Searching on any one of the three finds almost nothing, because the split
-//! across modifiers is random. This is also what every pseudo filter is built
-//! on: total resistance is the sum of every resistance modifier on the item.
-//!
-//! # Which types merge
-//!
-//! Only the types the trade site treats as one namespace. An explicit and a
-//! crafted modifier merge, because the trade site indexes both as explicit.
-//! An implicit does not merge with an explicit, because they are different
-//! filters and summing them would ask for a total no single item has.
-
 use crate::controller::parse::shared::modifiers::ParsedModifier;
 use crate::types::modifier::ModifierType;
 use crate::types::stat::StatRoll;
 
-/// How to combine several rolls of the same stat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Combine {
-    /// Add them. The normal case.
     #[default]
     Sum,
-    /// Take the largest. Used where the game does not stack them.
     Max,
-    /// Count how many there are rather than summing.
     Count,
 }
 
-/// One stat, totalled across every modifier that granted it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatTotal {
-    /// The canonical stat reference.
     pub reference: String,
-    /// The namespace to query under.
     pub kind: ModifierType,
-    /// The combined roll.
     pub roll: Option<StatRoll>,
-    /// How many modifiers contributed.
     pub sources: usize,
 }
 
-/// Whether two modifier types share a trade namespace.
-///
-/// Ported from `typesCanBeGrouped`. The trade site indexes all of these as
-/// explicit, so a life prefix and a crafted life suffix are one filter.
 pub fn types_can_be_grouped(a: ModifierType, b: ModifierType) -> bool {
     if a == b {
         return true;
@@ -62,9 +26,6 @@ pub fn types_can_be_grouped(a: ModifierType, b: ModifierType) -> bool {
     is_explicit_family(a) && is_explicit_family(b)
 }
 
-/// Whether a type is indexed as explicit on the trade site.
-///
-/// Ported from `EXPLICIT_MOD_TYPES`.
 pub fn is_explicit_family(kind: ModifierType) -> bool {
     matches!(
         kind,
@@ -77,11 +38,6 @@ pub fn is_explicit_family(kind: ModifierType) -> bool {
     )
 }
 
-/// Total every stat across the modifiers that grant it.
-///
-/// The result is ordered by first appearance, so the UI shows stats in the
-/// order the game printed them rather than in an order that changes between
-/// runs.
 pub fn sum_stats_by_type(modifiers: &[ParsedModifier]) -> Vec<StatTotal> {
     let mut out: Vec<StatTotal> = Vec::new();
 
@@ -91,7 +47,6 @@ pub fn sum_stats_by_type(modifiers: &[ParsedModifier]) -> Vec<StatTotal> {
         };
 
         for stat in &modifier.stats {
-            // Already totalled under a type this one groups with.
             if out
                 .iter()
                 .any(|t| t.reference == stat.reference && types_can_be_grouped(t.kind, kind))
@@ -101,9 +56,6 @@ pub fn sum_stats_by_type(modifiers: &[ParsedModifier]) -> Vec<StatTotal> {
 
             let mut rolls = Vec::new();
             let mut sources = 0;
-            // A fractured modifier in the group makes the whole total
-            // fractured, because the trade site files it that way and it
-            // cannot be removed.
             let mut has_fractured = false;
 
             for other in modifiers {
@@ -148,9 +100,6 @@ pub fn sum_stats_by_type(modifiers: &[ParsedModifier]) -> Vec<StatTotal> {
     out
 }
 
-/// Combine several rolls into one.
-///
-/// Ported from `statSourcesTotal`.
 pub fn combine(rolls: &[StatRoll], mode: Combine) -> Option<StatRoll> {
     if mode == Combine::Count {
         let count = rolls.len() as f64;
@@ -168,7 +117,6 @@ pub fn combine(rolls: &[StatRoll], mode: Combine) -> Option<StatRoll> {
         return None;
     }
 
-    // One roll is itself. Folding it would lose its flags.
     if rolls.len() == 1 {
         return Some(rolls[0]);
     }
@@ -190,8 +138,6 @@ pub fn combine(rolls: &[StatRoll], mode: Combine) -> Option<StatRoll> {
             Combine::Count => unreachable!("handled above"),
         }
 
-        // Any contributing roll being legacy or unscalable makes the total so,
-        // because the total inherits the constraint.
         out.legacy |= roll.legacy;
         out.unscalable |= roll.unscalable;
         out.decimals |= roll.decimals;
@@ -235,9 +181,6 @@ mod tests {
 
     #[test]
     fn the_same_stat_from_two_modifiers_is_summed() {
-        // A ring with life on a prefix and life from a rune has the total,
-        // and that total is what a buyer searches for. Searching on either
-        // half finds almost nothing.
         let mods = vec![
             modifier(
                 ModifierType::Explicit,
@@ -258,7 +201,6 @@ mod tests {
 
     #[test]
     fn an_explicit_and_a_crafted_modifier_merge() {
-        // The trade site indexes both as explicit, so they are one filter.
         let mods = vec![
             modifier(
                 ModifierType::Explicit,
@@ -278,8 +220,6 @@ mod tests {
 
     #[test]
     fn an_implicit_does_not_merge_with_an_explicit() {
-        // They are different filters. Summing them asks for a total on one
-        // filter that no single item has.
         let mods = vec![
             modifier(
                 ModifierType::Explicit,
@@ -300,7 +240,6 @@ mod tests {
 
     #[test]
     fn a_rune_does_not_merge_with_an_explicit() {
-        // Runes have their own trade namespace.
         let mods = vec![
             modifier(
                 ModifierType::Explicit,
@@ -351,7 +290,6 @@ mod tests {
 
     #[test]
     fn a_fractured_contributor_makes_the_whole_total_fractured() {
-        // The trade site files it that way and it cannot be removed.
         let mods = vec![
             modifier(
                 ModifierType::Explicit,
@@ -385,7 +323,6 @@ mod tests {
 
     #[test]
     fn the_order_the_game_printed_them_in_is_kept() {
-        // An order that changes between runs makes the panel jump around.
         let mods = vec![modifier(
             ModifierType::Explicit,
             vec![
@@ -402,7 +339,6 @@ mod tests {
 
     #[test]
     fn a_stat_with_no_roll_still_gets_a_total_entry() {
-        // It is a presence check and the query still needs the filter.
         let mods = vec![modifier(
             ModifierType::Explicit,
             vec![("Cannot be Frozen", None)],
@@ -457,10 +393,6 @@ mod tests {
         assert_eq!(totals[0].roll.unwrap().value, 45.0);
         assert_eq!(totals[0].sources, 3);
     }
-
-    // -----------------------------------------------------------------
-    // Combining rolls
-    // -----------------------------------------------------------------
 
     #[test]
     fn summing_adds_every_bound() {
@@ -527,7 +459,6 @@ mod tests {
 
     #[test]
     fn counting_nothing_reports_zero_rather_than_nothing() {
-        // A count filter of zero is a real thing to search for.
         let got = combine(&[], Combine::Count).unwrap();
 
         assert_eq!(got.value, 0.0);
@@ -540,7 +471,6 @@ mod tests {
 
     #[test]
     fn one_roll_keeps_its_own_flags() {
-        // Folding a single roll through the accumulator would lose them.
         let only = StatRoll {
             value: 20.0,
             legacy: true,
@@ -555,8 +485,6 @@ mod tests {
 
     #[test]
     fn one_legacy_contributor_makes_the_total_legacy() {
-        // The total inherits the constraint. An item with a legacy roll cannot
-        // be crafted again whatever the other modifiers say.
         let got = combine(
             &[
                 StatRoll {

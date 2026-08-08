@@ -1,26 +1,9 @@
-//! Rune and soul core sockets.
-//!
-//! Ported from `parseAugmentSockets`, `applyAugmentSockets`, `getMaxSockets`
-//! and `isArmourOrWeaponOrCaster` in `renderer/src/parser/Parser.ts`.
-//!
-//! # Why empty sockets matter
-//!
-//! A PoE2 base with an empty socket is worth more than the same base with a
-//! bad rune already in it, because a rune cannot be removed. The trade site
-//! filters on the socket count, so the parser has to work out how many the
-//! base has and how many are filled.
-//!
-//! The game does not print an empty socket count. It prints the sockets that
-//! exist, so an item with no socket line at all still has its base allowance
-//! available.
-
 use crate::controller::parse::{ParseError, ParseOutcome, ParserState};
 use crate::types::category::ItemCategory;
 use crate::types::client_strings as cs;
 use crate::types::item::{AugmentSockets, ItemRarity};
 use crate::types::modifier::ModifierType;
 
-/// Which broad group a category belongs to for socket purposes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SocketGroup {
     Armour,
@@ -28,10 +11,6 @@ pub enum SocketGroup {
     Caster,
 }
 
-/// The broad group a category belongs to.
-///
-/// Ported from `isArmourOrWeaponOrCaster`. Returns None for anything that
-/// cannot take a rune at all.
 pub fn socket_group(category: Option<ItemCategory>) -> Option<SocketGroup> {
     use ItemCategory::*;
 
@@ -53,12 +32,7 @@ pub fn socket_group(category: Option<ItemCategory>) -> Option<SocketGroup> {
     Some(group)
 }
 
-/// How many sockets a base can have.
-///
-/// Ported from `getMaxSockets`. Three uniques break the pattern and are named
-/// explicitly, which is how the reference does it too.
 pub fn max_sockets(category: Option<ItemCategory>, reference_name: &str) -> u32 {
-    // These three carry a socket count their category does not imply.
     match reference_name {
         "Darkness Enthroned" => return 2,
         "Grasping Ring" | "Corona Amulet" => return 1,
@@ -82,11 +56,6 @@ pub fn max_sockets(category: Option<ItemCategory>, reference_name: &str) -> u32 
     }
 }
 
-/// Read the `Sockets: S S` line on a rune bearing base.
-///
-/// A base that takes runes and prints no socket line still reports its full
-/// allowance as empty, because the sockets exist whether or not the game
-/// mentions them.
 pub fn parse_augment_sockets(section: &[String], state: &mut ParserState<'_>) -> ParseOutcome {
     let category_max = max_sockets(state.item.category, &state.item.info.reference_name);
 
@@ -103,7 +72,6 @@ pub fn parse_augment_sockets(section: &[String], state: &mut ParserState<'_>) ->
     };
 
     if let Some(rest) = first.strip_prefix(cs::SOCKETS) {
-        // The game prints one S per socket that exists on the item.
         let current = rest.trim_end().matches('S').count() as u32;
 
         state.item.augment_sockets = Some(AugmentSockets {
@@ -115,8 +83,6 @@ pub fn parse_augment_sockets(section: &[String], state: &mut ParserState<'_>) ->
         return ParseOutcome::SectionParsed;
     }
 
-    // No socket line. A craftable base still has its full allowance, and a
-    // corrupted one cannot gain sockets so it has none to offer.
     if state.item.is_modifiable() {
         state.item.augment_sockets = Some(AugmentSockets {
             empty: category_max,
@@ -128,17 +94,6 @@ pub fn parse_augment_sockets(section: &[String], state: &mut ParserState<'_>) ->
     ParseOutcome::SectionSkipped
 }
 
-/// Work out how many sockets are still empty.
-///
-/// Ported from `applyAugmentSockets`. A socket holding a rune shows up as an
-/// augment modifier, so the presence of any augment modifier means the sockets
-/// are filled.
-///
-/// The reference calls its own version of this a hack, because rune tiers make
-/// an exact count impossible from the item text alone. Treating any augment
-/// modifier as "sockets are used" is the same approximation, and it errs
-/// toward reporting fewer empty sockets, which understates the item rather
-/// than overstating it.
 pub fn apply_augment_sockets(state: &mut ParserState<'_>) -> Result<(), ParseError> {
     let Some(sockets) = state.item.augment_sockets else {
         return Ok(());
@@ -161,15 +116,6 @@ pub fn apply_augment_sockets(state: &mut ParserState<'_>) -> Result<(), ParseErr
     Ok(())
 }
 
-/// Fold added elemental damage modifiers into the weapon's element totals.
-///
-/// Ported from `applyElementalAdded`.
-///
-/// The game prints the total elemental damage on the weapon line but does not
-/// break it down. The breakdown comes from the modifiers, and a filter on fire
-/// damage specifically needs it.
-///
-/// Skipped on a unique, whose numbers come from the unique and not the base.
 pub fn apply_elemental_added(state: &mut ParserState<'_>) -> Result<(), ParseError> {
     if state.item.weapon.elemental.is_none() || state.item.rarity == Some(ItemRarity::Unique) {
         return Ok(());
@@ -201,19 +147,6 @@ pub fn apply_elemental_added(state: &mut ParserState<'_>) -> Result<(), ParseErr
     Ok(())
 }
 
-/// Fill a total the item did not print, and leave one it did alone.
-///
-/// # Why not add
-///
-/// This used to add. The game prints the damage an element deals **after** its
-/// modifiers, so a weapon that prints `Lightning Damage: 1-50` and carries
-/// `Adds 1 to 50 Lightning Damage` was counted twice and came out at 51
-/// against the reference's 25.5. Its elemental damage per second read double,
-/// which is most of what a weapon is priced on.
-///
-/// The pass is still needed. A weapon that prints only a combined
-/// `Elemental Damage:` line gives no per element split at all, and the
-/// modifiers are the only place that split exists.
 fn fill_if_absent(slot: &mut Option<f64>, value: f64) {
     if value == 0.0 || slot.is_some() {
         return;
@@ -245,10 +178,6 @@ mod tests {
 
         s
     }
-
-    // -----------------------------------------------------------------
-    // Socket allowance
-    // -----------------------------------------------------------------
 
     #[test]
     fn a_two_handed_base_takes_two_sockets() {
@@ -294,9 +223,6 @@ mod tests {
 
     #[test]
     fn the_three_uniques_that_break_the_pattern_are_named() {
-        // Each carries a socket count its category does not imply. Missing one
-        // would report zero sockets on an item whose sockets are the reason
-        // people buy it.
         assert_eq!(
             max_sockets(Some(ItemCategory::Belt), "Darkness Enthroned"),
             2
@@ -307,7 +233,6 @@ mod tests {
 
     #[test]
     fn a_named_unique_beats_its_category() {
-        // Darkness Enthroned is a belt, and belts take no runes.
         assert_eq!(max_sockets(Some(ItemCategory::Belt), ""), 0);
         assert_eq!(
             max_sockets(Some(ItemCategory::Belt), "Darkness Enthroned"),
@@ -332,10 +257,6 @@ mod tests {
         assert_eq!(socket_group(Some(ItemCategory::Ring)), None);
         assert_eq!(socket_group(None), None);
     }
-
-    // -----------------------------------------------------------------
-    // Reading the socket line
-    // -----------------------------------------------------------------
 
     #[test]
     fn a_socket_line_reports_how_many_are_filled() {
@@ -367,8 +288,6 @@ mod tests {
 
     #[test]
     fn a_craftable_base_with_no_socket_line_offers_its_full_allowance() {
-        // The sockets exist whether or not the game mentions them, and an item
-        // with empty sockets is worth more than one with a bad rune in it.
         let mut s = state_for(ItemCategory::Helmet, "Iron Hat");
 
         let out = parse_augment_sockets(&sec(&["Item Level: 80"]), &mut s);
@@ -386,7 +305,6 @@ mod tests {
 
     #[test]
     fn a_corrupted_base_with_no_socket_line_offers_nothing() {
-        // It cannot gain sockets, so reporting an allowance would overstate it.
         let mut s = state_for(ItemCategory::Helmet, "Iron Hat");
         s.item.is_corrupted = true;
 
@@ -415,10 +333,6 @@ mod tests {
         assert_eq!(out, ParseOutcome::SectionParsed);
         assert_eq!(s.item.augment_sockets.unwrap().normal, 2);
     }
-
-    // -----------------------------------------------------------------
-    // Working out what is empty
-    // -----------------------------------------------------------------
 
     fn with_rune() -> ParsedModifier {
         ParsedModifier {
@@ -453,9 +367,6 @@ mod tests {
 
     #[test]
     fn a_base_carrying_a_rune_reports_none_empty() {
-        // Rune tiers make an exact count impossible from the item text, so any
-        // rune means the sockets are used. That understates the item rather
-        // than overstating it.
         let mut s = state_for(ItemCategory::BodyArmour, "Vaal Regalia");
         s.item.augment_sockets = Some(AugmentSockets {
             empty: 0,
@@ -499,10 +410,6 @@ mod tests {
         assert_eq!(s.item.augment_sockets, None);
     }
 
-    // -----------------------------------------------------------------
-    // Elemental breakdown
-    // -----------------------------------------------------------------
-
     fn added(reference: &str, value: f64) -> ParsedModifier {
         ParsedModifier {
             info: ModifierInfo {
@@ -522,8 +429,6 @@ mod tests {
 
     #[test]
     fn added_elemental_modifiers_fill_in_the_breakdown() {
-        // The weapon line prints the total but not the breakdown, and a filter
-        // on fire damage specifically needs it.
         let mut s = state_for(ItemCategory::Bow, "Spine Bow");
         s.item.weapon = WeaponStats {
             elemental: Some(100.0),
@@ -567,13 +472,6 @@ mod tests {
 
     #[test]
     fn a_breakdown_the_weapon_line_already_gave_is_left_alone() {
-        // This used to assert the two were added, and the reference says
-        // otherwise: its MagicItem prints `Lightning Damage: 1-50` and carries
-        // `Adds 1 to 50 Lightning Damage`, and expects 25.5 rather than 51.
-        //
-        // The game prints an element's damage after its modifiers, so adding
-        // the modifier again doubles it, and elemental damage per second is
-        // most of what a weapon is priced on.
         let mut s = state_for(ItemCategory::Bow, "Spine Bow");
         s.item.weapon = WeaponStats {
             elemental: Some(100.0),
@@ -591,9 +489,6 @@ mod tests {
 
     #[test]
     fn an_element_the_weapon_line_never_split_out_is_filled_in() {
-        // The pass is still needed. A weapon printing only a combined
-        // `Elemental Damage:` line gives no per element split, and the
-        // modifiers are the only place that split exists.
         let mut s = state_for(ItemCategory::Bow, "Spine Bow");
         s.item.weapon = WeaponStats {
             elemental: Some(100.0),
@@ -622,7 +517,6 @@ mod tests {
 
     #[test]
     fn a_unique_keeps_no_breakdown() {
-        // Its numbers come from the unique and not from the base.
         let mut s = state_for(ItemCategory::Bow, "Spine Bow");
         s.item.rarity = Some(ItemRarity::Unique);
         s.item.weapon = WeaponStats {

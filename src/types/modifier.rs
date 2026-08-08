@@ -1,14 +1,5 @@
-//! The modifier model.
-//!
-//! Ported from `renderer/src/parser/modifiers.ts` and the metadata half of
-//! `advanced-mod-desc.ts`.
-
 use std::collections::HashSet;
 
-/// The namespace a modifier belongs to.
-///
-/// A stat can exist in several namespaces with a different trade id in each,
-/// which is why `TradeIds` is keyed by this.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ModifierType {
     Pseudo,
@@ -20,7 +11,6 @@ pub enum ModifierType {
     Necropolis,
     Veiled,
     Fractured,
-    /// Called `rune` on the trade site.
     Augment,
     AddedAugment,
     Sanctum,
@@ -29,7 +19,6 @@ pub enum ModifierType {
 }
 
 impl ModifierType {
-    /// The key used in the trade id table.
     pub fn as_str(self) -> &'static str {
         match self {
             ModifierType::Pseudo => "pseudo",
@@ -49,10 +38,6 @@ impl ModifierType {
         }
     }
 
-    /// The suffix the game prints after a stat line for this type.
-    ///
-    /// Explicit modifiers carry no suffix, which is why this returns an
-    /// option and why suffix detection is an ordered chain.
     pub fn line_suffix(self) -> Option<&'static str> {
         match self {
             ModifierType::Scourge => Some(" (scourge)"),
@@ -68,7 +53,6 @@ impl ModifierType {
     }
 }
 
-/// How a modifier was generated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Generation {
     Prefix,
@@ -78,7 +62,6 @@ pub enum Generation {
     Mutated,
 }
 
-/// Metadata the game prints when Advanced Item Description is enabled.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ModifierInfo {
     pub kind: Option<ModifierType>,

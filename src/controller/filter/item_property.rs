@@ -1,41 +1,13 @@
-//! Which of an item's own numbers are worth filtering on.
-//!
-//! Ported from `web/price-check/filters/pseudo/item-property.ts`.
-//!
-//! # Why not just filter on all of them
-//!
-//! A rare bow prints physical damage, elemental damage, crit chance and attack
-//! speed. Filtering on all four returns the one listing that is this exact
-//! bow. Filtering on none returns every bow of that base.
-//!
-//! What a buyer actually wants is narrow: the damage per second that matters
-//! for the weapon's type, and the one defence the armour is bought for.
-//!
-//! # Why physical damage is not always the number
-//!
-//! An axe is bought for physical damage per second. A wand is bought for
-//! spell damage and its physical is noise. Filtering pdps on a wand excludes
-//! every wand worth buying.
-
 use crate::types::category::ItemCategory;
 use crate::types::item::{ArmourStats, MapStats, WeaponStats};
 
-/// One property worth filtering on.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PropertyFilter {
-    /// The pseudo trade id.
     pub id: &'static str,
-    /// The value the item has.
     pub value: f64,
-    /// Whether it starts switched on.
     pub enabled: bool,
 }
 
-/// Whether physical damage per second is what this weapon is bought for.
-///
-/// Ported from `isPdpsImportant`. An axe is bought for it. A wand is bought
-/// for spell damage and its physical is noise, so filtering pdps on one
-/// excludes every wand worth buying.
 pub fn is_pdps_important(category: Option<ItemCategory>) -> bool {
     use ItemCategory::*;
 
@@ -57,10 +29,6 @@ pub fn is_pdps_important(category: Option<ItemCategory>) -> bool {
     )
 }
 
-/// Whether a caster weapon's own damage is noise.
-///
-/// A wand, sceptre or staff is bought for what it grants a spell, not for the
-/// damage it swings for.
 pub fn is_caster_weapon(category: Option<ItemCategory>) -> bool {
     matches!(
         category,
@@ -68,28 +36,15 @@ pub fn is_caster_weapon(category: Option<ItemCategory>) -> bool {
     )
 }
 
-/// Whether the armour is bought for exactly one defence.
-///
-/// Ported from `isSingleAttrArmour`. The reference always returns true with a
-/// note saying hybrid armour is bought for one defence in practice even when
-/// it has two, so only the largest is filtered on.
-///
-/// Kept as a function rather than inlined, because if that ever stops being
-/// true this is the one place to change.
 pub fn is_single_defence_armour(_armour: ArmourStats) -> bool {
     true
 }
 
-/// The defence an armour piece is bought for.
-///
-/// The largest one. A piece with 800 armour and 40 energy shield is an armour
-/// piece, and filtering on the energy shield would return every base that has
-/// any.
 pub fn primary_defence(armour: ArmourStats) -> Option<(&'static str, f64)> {
     let candidates = [
-        ("pseudo.pseudo_total_armour", armour.ar),
-        ("pseudo.pseudo_total_evasion", armour.ev),
-        ("pseudo.pseudo_total_energy_shield", armour.es),
+        ("item.armour", armour.ar),
+        ("item.evasion_rating", armour.ev),
+        ("item.energy_shield", armour.es),
     ];
 
     let mut best: Option<(&'static str, f64)> = None;
@@ -111,7 +66,6 @@ pub fn primary_defence(armour: ArmourStats) -> Option<(&'static str, f64)> {
     best
 }
 
-/// The property filters an armour piece deserves.
 pub fn armour_filters(armour: ArmourStats) -> Vec<PropertyFilter> {
     let Some((id, value)) = primary_defence(armour) else {
         return Vec::new();
@@ -125,11 +79,10 @@ pub fn armour_filters(armour: ArmourStats) -> Vec<PropertyFilter> {
         }];
     }
 
-    // Every defence it has, with only the largest switched on.
     [
-        ("pseudo.pseudo_total_armour", armour.ar),
-        ("pseudo.pseudo_total_evasion", armour.ev),
-        ("pseudo.pseudo_total_energy_shield", armour.es),
+        ("item.armour", armour.ar),
+        ("item.evasion_rating", armour.ev),
+        ("item.energy_shield", armour.es),
     ]
     .into_iter()
     .filter_map(|(candidate, v)| {
@@ -142,26 +95,18 @@ pub fn armour_filters(armour: ArmourStats) -> Vec<PropertyFilter> {
     .collect()
 }
 
-/// The property filters a weapon deserves.
-///
-/// Damage per second and not damage. The trade site indexes dps, and the same
-/// damage at a different attack speed is a different weapon.
 pub fn weapon_filters(category: Option<ItemCategory>, weapon: WeaponStats) -> Vec<PropertyFilter> {
     let Some(aps) = weapon.attack_speed else {
-        // Damage per second is undefined without it. Sending raw damage as dps
-        // would understate the weapon by a factor of two.
         return Vec::new();
     };
 
-    // A caster weapon is bought for what it grants a spell, not for the
-    // damage it swings for.
     if is_caster_weapon(category) {
         return weapon
             .spirit
             .filter(|s| *s > 0.0)
             .map(|spirit| {
                 vec![PropertyFilter {
-                    id: "pseudo.pseudo_total_spirit",
+                    id: "item.spirit",
                     value: spirit,
                     enabled: true,
                 }]
@@ -182,16 +127,14 @@ pub fn weapon_filters(category: Option<ItemCategory>, weapon: WeaponStats) -> Ve
     let pdps_matters = is_pdps_important(category) && physical > 0.0;
 
     out.push(PropertyFilter {
-        id: "pseudo.pseudo_total_dps",
+        id: "item.total_dps",
         value: total,
-        // Total damage per second is enabled only when neither half dominates,
-        // because otherwise the specific one is the better filter.
         enabled: !pdps_matters && elemental <= 0.0,
     });
 
     if physical > 0.0 {
         out.push(PropertyFilter {
-            id: "pseudo.pseudo_total_physical_dps",
+            id: "item.physical_dps",
             value: physical,
             enabled: pdps_matters,
         });
@@ -199,10 +142,8 @@ pub fn weapon_filters(category: Option<ItemCategory>, weapon: WeaponStats) -> Ve
 
     if elemental > 0.0 {
         out.push(PropertyFilter {
-            id: "pseudo.pseudo_total_elemental_dps",
+            id: "item.elemental_dps",
             value: elemental,
-            // An elemental weapon is bought for its elemental damage, and a
-            // physical one is not bought for the little it has.
             enabled: !pdps_matters,
         });
     }
@@ -210,20 +151,10 @@ pub fn weapon_filters(category: Option<ItemCategory>, weapon: WeaponStats) -> Ve
     out
 }
 
-/// Which of a map's own numbers are worth filtering on.
-///
-/// Ported from `mapProps`. A map is bought for what it drops, so pack size and
-/// item rarity are the numbers that decide the price.
-///
-/// Every one starts switched off. A map with a good pack size and a poor item
-/// rarity is still a map worth buying, and filtering on both at once returns
-/// the one listing that is this exact map.
 pub fn map_filters(map: MapStats) -> Vec<PropertyFilter> {
     let mut out = Vec::new();
 
     let mut push = |id: &'static str, value: Option<f64>| {
-        // Zero is not a number worth filtering on. A map with no pack size
-        // bonus filtered at zero matches every map ever printed.
         if let Some(value) = value.filter(|v| *v != 0.0) {
             out.push(PropertyFilter {
                 id,
@@ -243,19 +174,6 @@ pub fn map_filters(map: MapStats) -> Vec<PropertyFilter> {
     out
 }
 
-/// The filter on how well the base itself rolled.
-///
-/// Ported from `filterBasePercentile`.
-///
-/// # What the percentile means
-///
-/// A base rolls its own armour and evasion within a range before any modifier
-/// touches it. Two identical looking chests can differ by a fifth of their
-/// defences because one rolled at the top of its range.
-///
-/// It starts switched on only above the halfway mark. A base that rolled below
-/// average is not what the buyer is paying for, and filtering on it narrows
-/// the search for nothing.
 pub fn base_percentile_filter(percentile: Option<f64>) -> Option<PropertyFilter> {
     percentile.map(|value| PropertyFilter {
         id: "item.base_percentile",
@@ -264,12 +182,6 @@ pub fn base_percentile_filter(percentile: Option<f64>) -> Option<PropertyFilter>
     })
 }
 
-/// Drop the stats a property filter has already accounted for.
-///
-/// Ported from `removeUsedStats`. A bow's physical damage comes from its
-/// increased physical damage modifier. Sending both the damage per second and
-/// the modifier that produced it filters the same thing twice, and the search
-/// narrows twice as far as the buyer asked.
 pub fn remove_used_stats(stats: &mut Vec<String>, used: &[&str]) {
     stats.retain(|reference| !used.contains(&reference.as_str()));
 }
@@ -311,7 +223,6 @@ mod tests {
 
     #[test]
     fn a_caster_weapon_is_not() {
-        // Filtering pdps on a wand excludes every wand worth buying.
         for c in [
             ItemCategory::Wand,
             ItemCategory::Sceptre,
@@ -331,11 +242,9 @@ mod tests {
 
     #[test]
     fn the_largest_defence_is_the_one_the_piece_is_bought_for() {
-        // A piece with 800 armour and 40 energy shield is an armour piece.
-        // Filtering the energy shield returns every base that has any.
         let got = primary_defence(armour(Some(800.0), None, Some(40.0))).unwrap();
 
-        assert_eq!(got.0, "pseudo.pseudo_total_armour");
+        assert_eq!(got.0, "item.armour");
         assert_eq!(got.1, 800.0);
     }
 
@@ -343,24 +252,23 @@ mod tests {
     fn each_defence_can_be_the_primary_one() {
         assert_eq!(
             primary_defence(armour(Some(100.0), None, None)).unwrap().0,
-            "pseudo.pseudo_total_armour"
+            "item.armour"
         );
         assert_eq!(
             primary_defence(armour(None, Some(100.0), None)).unwrap().0,
-            "pseudo.pseudo_total_evasion"
+            "item.evasion_rating"
         );
         assert_eq!(
             primary_defence(armour(None, None, Some(100.0))).unwrap().0,
-            "pseudo.pseudo_total_energy_shield"
+            "item.energy_shield"
         );
     }
 
     #[test]
     fn a_zero_defence_is_not_the_primary_one() {
-        // A floor of zero matches everything and only slows the search.
         let got = primary_defence(armour(Some(0.0), Some(50.0), None)).unwrap();
 
-        assert_eq!(got.0, "pseudo.pseudo_total_evasion");
+        assert_eq!(got.0, "item.evasion_rating");
     }
 
     #[test]
@@ -380,17 +288,12 @@ mod tests {
 
     #[test]
     fn a_weapon_is_filtered_on_damage_per_second() {
-        // The trade site indexes dps, and the same damage at a different
-        // attack speed is a different weapon.
         let got = weapon_filters(
             Some(ItemCategory::Bow),
             weapon(Some(100.0), None, Some(1.5)),
         );
 
-        let pdps = got
-            .iter()
-            .find(|f| f.id == "pseudo.pseudo_total_physical_dps")
-            .unwrap();
+        let pdps = got.iter().find(|f| f.id == "item.physical_dps").unwrap();
 
         assert_eq!(pdps.value, 150.0);
         assert!(pdps.enabled);
@@ -398,8 +301,6 @@ mod tests {
 
     #[test]
     fn a_weapon_with_no_attack_speed_gets_no_filters() {
-        // Damage per second is undefined without it, and sending raw damage as
-        // dps understates the weapon by a factor of two.
         assert!(
             weapon_filters(Some(ItemCategory::Bow), weapon(Some(100.0), None, None)).is_empty()
         );
@@ -417,8 +318,6 @@ mod tests {
             },
         );
 
-        // A wand with no spirit yields nothing, because it is bought for what
-        // it grants a spell.
         assert!(got.is_empty());
     }
 
@@ -435,22 +334,18 @@ mod tests {
         );
 
         assert_eq!(got.len(), 1);
-        assert_eq!(got[0].id, "pseudo.pseudo_total_spirit");
+        assert_eq!(got[0].id, "item.spirit");
         assert!(got[0].enabled);
     }
 
     #[test]
     fn a_physical_weapon_leaves_its_elemental_filter_off() {
-        // It is not bought for the little elemental damage it has.
         let got = weapon_filters(
             Some(ItemCategory::TwoHandedAxe),
             weapon(Some(200.0), Some(20.0), Some(1.2)),
         );
 
-        let elemental = got
-            .iter()
-            .find(|f| f.id == "pseudo.pseudo_total_elemental_dps")
-            .unwrap();
+        let elemental = got.iter().find(|f| f.id == "item.elemental_dps").unwrap();
 
         assert!(!elemental.enabled);
     }
@@ -467,17 +362,13 @@ mod tests {
             weapon(Some(100.0), Some(50.0), Some(2.0)),
         );
 
-        let total = got
-            .iter()
-            .find(|f| f.id == "pseudo.pseudo_total_dps")
-            .unwrap();
+        let total = got.iter().find(|f| f.id == "item.total_dps").unwrap();
 
         assert_eq!(total.value, 300.0);
     }
 
     #[test]
     fn exactly_one_weapon_filter_is_enabled() {
-        // Two enabled filters on one weapon narrow it to the exact item.
         for (category, stats) in [
             (
                 ItemCategory::Bow,
@@ -495,19 +386,12 @@ mod tests {
 
     #[test]
     fn a_single_defence_piece_is_treated_as_such() {
-        // The reference always says yes, with a note that hybrid armour is
-        // bought for one defence in practice. This is the one place to change
-        // if that stops being true.
         assert!(is_single_defence_armour(armour(
             Some(100.0),
             Some(100.0),
             None
         )));
     }
-
-    // -----------------------------------------------------------------
-    // Maps
-    // -----------------------------------------------------------------
 
     fn map_with(pack_size: Option<f64>, rarity: Option<f64>) -> MapStats {
         MapStats {
@@ -530,8 +414,6 @@ mod tests {
 
     #[test]
     fn every_map_filter_starts_switched_off() {
-        // A map with a good pack size and a poor item rarity is still worth
-        // buying, and filtering on both returns this exact map.
         for filter in map_filters(map_with(Some(30.0), Some(80.0))) {
             assert!(!filter.enabled, "{}", filter.id);
         }
@@ -544,8 +426,6 @@ mod tests {
 
     #[test]
     fn a_zero_is_not_a_number_worth_filtering_on() {
-        // A map with no pack size bonus filtered at zero matches every map
-        // ever printed.
         assert!(map_filters(map_with(Some(0.0), None)).is_empty());
     }
 
@@ -558,8 +438,6 @@ mod tests {
 
     #[test]
     fn the_poe1_only_numbers_are_still_read() {
-        // A PoE1 map prints them and a PoE2 one does not. Dropping them would
-        // silently lose the filter on every PoE1 map.
         let got = map_filters(MapStats {
             magic_monsters: Some(20.0),
             rare_monsters: Some(15.0),
@@ -581,7 +459,6 @@ mod tests {
 
     #[test]
     fn every_map_filter_id_is_distinct() {
-        // A duplicate id would overwrite its twin in the request body.
         let got = map_filters(MapStats {
             pack_size: Some(1.0),
             item_rarity: Some(1.0),
@@ -600,14 +477,8 @@ mod tests {
         assert_eq!(seen.len(), count);
     }
 
-    // -----------------------------------------------------------------
-    // Base percentile
-    // -----------------------------------------------------------------
-
     #[test]
     fn a_well_rolled_base_starts_switched_on() {
-        // Two identical looking chests can differ by a fifth of their defences
-        // because one rolled at the top of its range.
         let got = base_percentile_filter(Some(85.0)).expect("a percentile filters");
 
         assert_eq!(got.id, "item.base_percentile");
@@ -617,8 +488,6 @@ mod tests {
 
     #[test]
     fn a_below_average_base_starts_switched_off() {
-        // It is not what the buyer is paying for, and filtering on it narrows
-        // the search for nothing.
         assert!(
             !base_percentile_filter(Some(20.0))
                 .expect("a percentile filters")
@@ -637,19 +506,11 @@ mod tests {
 
     #[test]
     fn an_unknown_percentile_produces_no_filter() {
-        // The roll ranges come from the game bundles, which we do not carry
-        // for most bases. Guessing would price the item against nothing.
         assert_eq!(base_percentile_filter(None), None);
     }
 
-    // -----------------------------------------------------------------
-    // Removing accounted stats
-    // -----------------------------------------------------------------
-
     #[test]
     fn a_stat_a_property_already_covers_is_dropped() {
-        // Sending both the damage per second and the modifier that produced it
-        // narrows the search twice as far as the buyer asked.
         let mut stats = vec![
             "#% increased Physical Damage".to_string(),
             "+# to maximum Life".to_string(),
@@ -680,8 +541,6 @@ mod tests {
 
     #[test]
     fn every_copy_of_a_used_stat_is_dropped() {
-        // A hybrid modifier can list the same stat twice, and leaving one
-        // behind sends the duplicate filter this exists to prevent.
         let mut stats = vec!["a".to_string(), "b".to_string(), "a".to_string()];
 
         remove_used_stats(&mut stats, &["a"]);

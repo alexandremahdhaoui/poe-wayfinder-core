@@ -1,25 +1,9 @@
-//! Finding the item in the data tables.
-//!
-//! Ported from `normalizeName` and `findInDatabase` in
-//! `renderer/src/parser/Parser.ts`.
-//!
-//! # Why this is two stages and not one
-//!
-//! The name the game prints is not always the name the data file uses. A
-//! blighted map prints `Blighted Toxic Map` and the data file has `Toxic Map`.
-//! A metamorph organ prints the monster's name and the data file has
-//! `Metamorph Brain`.
-//!
-//! So the name is normalised first, then looked up. Merging the two would make
-//! the lookup a pile of special cases.
-
 use crate::adapter::data_adapter::Namespace;
 use crate::controller::parse::{ParseError, ParserState};
 use crate::types::category::ItemCategory;
 use crate::types::client_strings as cs;
 use crate::types::item::{ItemRarity, MapBlighted};
 
-/// Rewrite the name into the form the data file uses.
 pub fn normalize_name(state: &mut ParserState<'_>) -> Result<(), ParseError> {
     strip_magic_affixes(state);
     strip_blight_prefix(state);
@@ -28,23 +12,6 @@ pub fn normalize_name(state: &mut ParserState<'_>) -> Result<(), ParseError> {
     Ok(())
 }
 
-/// Cut a magic item's rolled affixes off its name.
-///
-/// A magic item is named for its affixes: `Pulsing Antler Focus of Nourishment`
-/// is an `Antler Focus`. Nothing in the text says where the affixes end, so the
-/// item table decides, which is what `magic_base_type` is for.
-///
-/// # Why this line was the whole bug
-///
-/// `magic_base_type` was written and tested and then never called. The
-/// reference calls it from `normalizeName`; ours did not. So every magic item
-/// went to the database under its full rolled name, matched nothing, and was
-/// searched for by a name no base has. An empty result reads as "this item is
-/// worthless".
-///
-/// A base the data does not know leaves the name alone. Searching by the
-/// rolled name finds nothing, which is wrong, but inventing a shorter base
-/// would search for the wrong item, which is worse.
 fn strip_magic_affixes(state: &mut ParserState<'_>) {
     if state.item.rarity != Some(ItemRarity::Magic) {
         return;
@@ -57,13 +24,6 @@ fn strip_magic_affixes(state: &mut ParserState<'_>) {
     }
 }
 
-/// Take `Blighted ` or `Blight-ravaged ` off a map name.
-///
-/// The prefix is a property of the map and not part of its base, so it is
-/// recorded on the item and removed from the name.
-///
-/// Only normal and rare maps carry it. A magic map's name is already rolled
-/// and stripping a word off it would break the lookup.
 fn strip_blight_prefix(state: &mut ParserState<'_>) {
     if !matches!(
         state.item.rarity,
@@ -72,16 +32,11 @@ fn strip_blight_prefix(state: &mut ParserState<'_>) {
         return;
     }
 
-    // The base type carries the prefix when there is one. Otherwise the name
-    // does, because a normal map prints no separate base type line.
     let target = match state.base_type.as_deref() {
         Some(base) => base.to_string(),
         None => state.name.clone(),
     };
 
-    // Checked longest first. "Blight-ravaged " does not start with
-    // "Blighted ", but checking the shorter one first is the kind of ordering
-    // bug that is invisible until a specific map drops.
     let stripped = if let Some(rest) = target.strip_prefix(cs::MAP_BLIGHT_RAVAGED) {
         Some((rest.to_string(), MapBlighted::BlightRavaged))
     } else {
@@ -103,10 +58,6 @@ fn strip_blight_prefix(state: &mut ParserState<'_>) {
     }
 }
 
-/// Turn a metamorph organ's monster name into its data file name.
-///
-/// The game prints `Ancient Guardian's Brain`. The data file has
-/// `Metamorph Brain`, because the monster does not change the price.
 fn normalise_metamorph_organ(state: &mut ParserState<'_>) {
     if state.item.category != Some(ItemCategory::MetamorphSample) {
         return;
@@ -121,19 +72,12 @@ fn normalise_metamorph_organ(state: &mut ParserState<'_>) {
     }
 }
 
-/// Look the item up and fill in what the data file knows.
-///
-/// Missing the item is not an error. A base the data does not have still
-/// prices by category and modifiers, and refusing to search because one table
-/// is stale helps nobody.
 pub fn find_in_database(state: &mut ParserState<'_>) -> Result<(), ParseError> {
     let (namespace, key) = lookup_key(state);
 
     let found = state.data.items_by_name(&key, namespace, state.game);
 
     if let Some(base) = pick_variant(state, found) {
-        // The category from the data file wins. The item class line names a
-        // class, not a trade category, and the two do not line up.
         if let Some(category) = base.category {
             state.item.category = Some(category);
         }
@@ -141,19 +85,11 @@ pub fn find_in_database(state: &mut ParserState<'_>) -> Result<(), ParseError> {
         state.item.info = base;
     }
 
-    // After the lookup, and outside it. A unique the table does not know yet
-    // still printed its base, and that is still what the query needs. The
-    // assignment above would otherwise overwrite it.
     remember_unique_base(state);
 
     Ok(())
 }
 
-/// Keep the base type a unique is built on.
-///
-/// The unique's own entry names the unique. The trade query needs the base, so
-/// the line the game prints under the name is kept. Without it a unique
-/// searches with its own name as the type and matches nothing.
 fn remember_unique_base(state: &mut ParserState<'_>) {
     if state.item.rarity != Some(ItemRarity::Unique) || state.item.is_unidentified {
         return;
@@ -162,7 +98,6 @@ fn remember_unique_base(state: &mut ParserState<'_>) {
     state.item.info.unique_base = state.base_type.clone();
 }
 
-/// Which table to search and with what name.
 fn lookup_key(state: &ParserState<'_>) -> (Namespace, String) {
     let name = state.name.clone();
     let base_or_name = state.base_type.clone().unwrap_or_else(|| name.clone());
@@ -172,8 +107,6 @@ fn lookup_key(state: &ParserState<'_>) -> (Namespace, String) {
         Some(ItemCategory::CapturedBeast) => (Namespace::CapturedBeast, base_or_name),
         Some(c) if c.is_gem() => (Namespace::Gem, name),
         Some(ItemCategory::MetamorphSample) => (Namespace::Item, name),
-        // Every voidstone is the same base. The game gives each a unique name
-        // and the trade site files them all under one.
         Some(ItemCategory::Voidstone) => (Namespace::Item, "Charged Compass".to_string()),
         _ if state.item.rarity == Some(ItemRarity::Unique) && !state.item.is_unidentified => {
             (Namespace::Unique, name)
@@ -182,11 +115,6 @@ fn lookup_key(state: &ParserState<'_>) -> (Namespace, String) {
     }
 }
 
-/// Pick one base when the name covers several.
-///
-/// A Two-Stone Ring is fire and cold or fire and lightning, and only the
-/// implicit tells them apart. Until the implicits are compared, the first is
-/// taken, which is what the reference does before its own variant pass.
 fn pick_variant(
     _state: &ParserState<'_>,
     mut found: Vec<crate::types::item::BaseInfo>,
@@ -252,10 +180,6 @@ mod tests {
         }
     }
 
-    // -----------------------------------------------------------------
-    // Name normalisation
-    // -----------------------------------------------------------------
-
     #[test]
     fn a_blighted_map_loses_its_prefix_and_records_the_flag() {
         let data = table(Vec::new());
@@ -270,8 +194,6 @@ mod tests {
 
     #[test]
     fn a_blight_ravaged_map_is_not_read_as_merely_blighted() {
-        // Checking the shorter prefix first is invisible until a specific map
-        // drops, and then the lookup misses.
         let data = table(Vec::new());
         let mut s = state_with(&data, "Blight-ravaged Toxic Map");
         s.item.rarity = Some(ItemRarity::Normal);
@@ -297,8 +219,6 @@ mod tests {
 
     #[test]
     fn a_magic_map_keeps_its_name() {
-        // A magic map's name is already rolled and stripping a word off it
-        // would break the lookup.
         let data = table(Vec::new());
         let mut s = state_with(&data, "Blighted Toxic Map of Impotence");
         s.item.rarity = Some(ItemRarity::Magic);
@@ -323,8 +243,6 @@ mod tests {
 
     #[test]
     fn every_metamorph_organ_becomes_its_data_file_name() {
-        // The monster does not change the price, so the data file has one
-        // record per organ.
         for organ in ["Brain", "Eye", "Lung", "Heart", "Liver"] {
             let data = table(Vec::new());
             let mut s = state_with(&data, &format!("Ancient Guardian's {organ}"));
@@ -347,10 +265,6 @@ mod tests {
         assert_eq!(s.name, "Kaom's Heart");
     }
 
-    // -----------------------------------------------------------------
-    // Lookup
-    // -----------------------------------------------------------------
-
     #[test]
     fn a_rare_is_looked_up_by_its_base_type() {
         let data = table(vec![(
@@ -369,7 +283,6 @@ mod tests {
 
     #[test]
     fn a_normal_item_is_looked_up_by_its_name() {
-        // It prints no separate base type line.
         let data = table(vec![(
             Namespace::Item,
             base("Spine Bow", Some(ItemCategory::Bow)),
@@ -400,15 +313,11 @@ mod tests {
 
         find_in_database(&mut s).unwrap();
 
-        // The unique table won, not the item table.
         assert_eq!(s.item.category, Some(ItemCategory::BodyArmour));
     }
 
     #[test]
     fn a_magic_item_is_looked_up_by_its_base_and_not_its_rolled_name() {
-        // magic_base_type was written, tested, and never called. Every magic
-        // item went to the database under its full rolled name, matched
-        // nothing, and was searched for by a name no base has.
         let data = table(vec![(
             Namespace::Item,
             BaseInfo {
@@ -429,9 +338,6 @@ mod tests {
 
     #[test]
     fn a_rare_keeps_its_rolled_name() {
-        // A rare's name is random and is never a base. Running the magic strip
-        // on one would cut words off a name that means nothing anyway, and
-        // could match a base by accident.
         let data = table(vec![(
             Namespace::Item,
             BaseInfo {
@@ -452,9 +358,6 @@ mod tests {
 
     #[test]
     fn a_magic_item_whose_base_is_unknown_keeps_its_name() {
-        // Searching by the rolled name finds nothing, which is wrong.
-        // Inventing a shorter base searches for the wrong item, which is
-        // worse.
         let data = table(vec![]);
 
         let mut s = state_with(&data, "Pulsing Antler Focus of Nourishment");
@@ -467,8 +370,6 @@ mod tests {
 
     #[test]
     fn a_magic_base_must_be_craftable_to_count() {
-        // A currency or gem name appearing inside a magic item's affixes must
-        // not be mistaken for its base.
         let data = table(vec![(
             Namespace::Item,
             BaseInfo {
@@ -489,8 +390,6 @@ mod tests {
 
     #[test]
     fn a_unique_keeps_the_base_type_printed_under_its_name() {
-        // The unique's own entry names the unique twice over. The base is only
-        // in the clipboard, and the trade query needs it.
         let data = table(vec![(
             Namespace::Unique,
             base("Kaom's Heart", Some(ItemCategory::BodyArmour)),
@@ -506,8 +405,6 @@ mod tests {
 
     #[test]
     fn a_unique_the_data_does_not_know_still_keeps_its_base() {
-        // A new league's uniques are missing from the table for a few days.
-        // The base is still on the clipboard and still worth sending.
         let data = table(vec![]);
         let mut s = state_with(&data, "Brand New Unique");
         s.base_type = Some("Glorious Plate".into());
@@ -520,8 +417,6 @@ mod tests {
 
     #[test]
     fn a_rare_keeps_no_unique_base() {
-        // The field decides how the query is typed. Setting it on a rare would
-        // send the base as a unique's base and drop the rarity filter.
         let data = table(vec![(
             Namespace::Item,
             base("Glorious Plate", Some(ItemCategory::BodyArmour)),
@@ -537,9 +432,6 @@ mod tests {
 
     #[test]
     fn an_unidentified_unique_keeps_no_base_of_its_own() {
-        // It is already looked up by its base, so its info is the base. Naming
-        // it again as a unique base would search for a unique that has no name
-        // yet.
         let data = table(vec![(
             Namespace::Item,
             base("Glorious Plate", Some(ItemCategory::BodyArmour)),
@@ -555,7 +447,6 @@ mod tests {
 
     #[test]
     fn an_unidentified_unique_is_looked_up_by_its_base_type() {
-        // Its own name is not printed yet.
         let data = table(vec![(
             Namespace::Item,
             base("Glorious Plate", Some(ItemCategory::BodyArmour)),
@@ -572,8 +463,6 @@ mod tests {
 
     #[test]
     fn a_divination_card_is_looked_up_in_its_own_table() {
-        // The same name can exist as a unique. Searching the wrong table makes
-        // the price check silently wrong.
         let data = table(vec![
             (Namespace::DivinationCard, base("The Doctor", None)),
             (
@@ -586,7 +475,6 @@ mod tests {
 
         find_in_database(&mut s).unwrap();
 
-        // The card has no category of its own, so the one set stays.
         assert_eq!(s.item.category, Some(ItemCategory::DivinationCard));
         assert_eq!(s.item.info.reference_name, "The Doctor");
     }
@@ -622,8 +510,6 @@ mod tests {
 
     #[test]
     fn every_voidstone_looks_up_the_same_base() {
-        // The game gives each a unique name and the trade site files them all
-        // under one.
         let data = table(vec![(
             Namespace::Item,
             base("Charged Compass", Some(ItemCategory::Voidstone)),
@@ -638,8 +524,6 @@ mod tests {
 
     #[test]
     fn an_item_the_data_does_not_have_is_not_an_error() {
-        // A base the data is missing still prices by category and modifiers.
-        // Refusing to search because one table is stale helps nobody.
         let data = table(Vec::new());
         let mut s = state_with(&data, "Brand New Base");
         s.item.rarity = Some(ItemRarity::Rare);
@@ -651,7 +535,6 @@ mod tests {
 
     #[test]
     fn the_data_file_category_beats_whatever_was_set() {
-        // The item class line names a class, not a trade category.
         let data = table(vec![(
             Namespace::Item,
             base("Spine Bow", Some(ItemCategory::Bow)),

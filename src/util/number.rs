@@ -1,14 +1,3 @@
-//! Reading numbers out of item text.
-//!
-//! The game decorates its numbers. `Quality: +20% (augmented)` holds the value
-//! 20. `Stack Size: 2,448/40` holds 2448 and 40. Every stage that reads a
-//! number goes through here so the decoration rules live in one place.
-
-/// Read the leading number of a decorated string.
-///
-/// Mirrors JavaScript `parseInt`, which the reference relies on. It reads an
-/// optional sign then digits and stops at the first character that is neither.
-/// `+20% (augmented)` gives 20.
 pub fn leading_int(text: &str) -> Option<i64> {
     let text = text.trim_start();
     let mut chars = text.char_indices();
@@ -39,10 +28,6 @@ pub fn leading_int(text: &str) -> Option<i64> {
     text[..end].parse().ok()
 }
 
-/// Read the leading number of a decorated string, allowing a decimal point.
-///
-/// Mirrors JavaScript `parseFloat`. Attack speed and crit chance are printed
-/// with decimals, so those stages need this and not `leading_int`.
 pub fn leading_float(text: &str) -> Option<f64> {
     let text = text.trim_start();
 
@@ -78,11 +63,6 @@ pub fn leading_float(text: &str) -> Option<f64> {
     text[..end].parse().ok()
 }
 
-/// Read a number after stripping everything that is not a digit.
-///
-/// The game inserts a thousands separator that varies with the client locale,
-/// so `2,448` and `2 448` both mean 2448. Any sign is lost, which is correct
-/// here because every field that uses this is a count.
 pub fn digits_only(text: &str) -> Option<u64> {
     let digits: String = text.chars().filter(char::is_ascii_digit).collect();
 
@@ -93,12 +73,6 @@ pub fn digits_only(text: &str) -> Option<u64> {
     digits.parse().ok()
 }
 
-/// Average a printed damage roll.
-///
-/// Ported from `getRollOrMinmaxAvg` in `stat-translations.ts`.
-///
-/// Four values average as four, two average as two, and anything else takes
-/// the first. Damage prints as `min-max`, so the common case is two.
 pub fn roll_or_minmax_avg(values: &[f64]) -> Option<f64> {
     match values.len() {
         0 => None,
@@ -108,10 +82,6 @@ pub fn roll_or_minmax_avg(values: &[f64]) -> Option<f64> {
     }
 }
 
-/// Average one printed damage range such as `12-34`.
-///
-/// Every part is read with digits only, matching the reference, so a decorated
-/// range still yields its numbers.
 pub fn damage_range_avg(text: &str) -> Option<f64> {
     let parts: Vec<f64> = text
         .split('-')
@@ -121,9 +91,6 @@ pub fn damage_range_avg(text: &str) -> Option<f64> {
     roll_or_minmax_avg(&parts)
 }
 
-/// Sum a comma separated list of damage ranges.
-///
-/// Elemental damage prints as `12-34, 56-78`, one range per element.
 pub fn damage_list_sum(text: &str) -> Option<f64> {
     let mut total = 0.0;
     let mut any = false;
@@ -172,8 +139,6 @@ mod tests {
 
     #[test]
     fn leading_int_stops_at_a_decimal_point() {
-        // parseInt semantics. 1.35 attacks per second reads as 1 here, which
-        // is why attack speed uses leading_float instead.
         assert_eq!(leading_int("1.35"), Some(1));
     }
 
@@ -203,8 +168,6 @@ mod tests {
 
     #[test]
     fn digits_only_drops_a_thousands_separator() {
-        // The separator varies with the client locale, so no single character
-        // can be special cased.
         assert_eq!(digits_only("2,448"), Some(2448));
         assert_eq!(digits_only("2 448"), Some(2448));
         assert_eq!(digits_only("2.448"), Some(2448));
@@ -212,7 +175,6 @@ mod tests {
 
     #[test]
     fn digits_only_drops_a_sign() {
-        // Every caller counts something, so a sign is never meaningful.
         assert_eq!(digits_only("-15"), Some(15));
     }
 
@@ -234,8 +196,6 @@ mod tests {
 
     #[test]
     fn a_three_value_roll_takes_the_first() {
-        // Odd and faithful. The reference falls through to values[0] for any
-        // length that is not 2 or 4.
         assert_eq!(roll_or_minmax_avg(&[7.0, 8.0, 9.0]), Some(7.0));
     }
 
@@ -266,7 +226,6 @@ mod tests {
 
     #[test]
     fn a_damage_list_sums_every_element() {
-        // Elemental damage prints one range per element.
         assert_eq!(damage_list_sum("12-34, 56-78"), Some(23.0 + 67.0));
     }
 

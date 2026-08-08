@@ -1,14 +1,3 @@
-//! Items whose modifier block does not follow the normal rules.
-//!
-//! Ported from `parseMirroredTablet`, `parseFilledCoffin`, `parseLogbookArea`,
-//! `parseAtzoatlRooms`, `parseFractured`, `parseBlightedMap` and
-//! `calcBasePercentile` in `renderer/src/parser/Parser.ts`.
-//!
-//! Each of these is one named base that prints something no other item does.
-//! They are gated on the base name so an ordinary item can never fall into
-//! them, and each is small enough that the alternative is a pile of special
-//! cases inside the general modifier stage.
-
 use crate::controller::aggregate::sum_stats_by_type;
 use crate::controller::calc::base::{contributions, ARMOUR, ENERGY_SHIELD, EVASION};
 use crate::controller::calc::quality::prop_percentile;
@@ -23,24 +12,16 @@ use crate::types::modifier::{ModifierInfo, ModifierType};
 
 use super::modifiers::ParsedModifier;
 
-/// The Mirrored Tablet's pseudo modifier block.
-///
-/// It prints eight or more lines that are each a whole modifier, with no
-/// metadata and no suffix. Nothing marks them, so the only signal is the base
-/// name and the section length.
 pub fn parse_mirrored_tablet(section: &[String], state: &mut ParserState<'_>) -> ParseOutcome {
     if state.item.info.reference_name != "Mirrored Tablet" {
         return ParseOutcome::ParserSkipped;
     }
 
-    // Eight is the reference's threshold. A shorter section on this base is
-    // something else, such as the item level block.
     if section.len() < 8 {
         return ParseOutcome::SectionSkipped;
     }
 
     for line in section {
-        // Every line is its own modifier and none of them scale.
         let stat_line = StatString {
             string: line.clone(),
             unscalable: true,
@@ -64,11 +45,6 @@ pub fn parse_mirrored_tablet(section: &[String], state: &mut ParserState<'_>) ->
     ParseOutcome::SectionParsed
 }
 
-/// The Filled Coffin's necropolis modifier block.
-///
-/// It prints its modifiers with an implicit suffix, which the general stage
-/// would read as implicits. They are necropolis modifiers and the trade site
-/// files them under their own namespace.
 pub fn parse_filled_coffin(section: &[String], state: &mut ParserState<'_>) -> ParseOutcome {
     if state.item.info.reference_name != "Filled Coffin" {
         return ParseOutcome::ParserSkipped;
@@ -109,18 +85,11 @@ pub fn parse_filled_coffin(section: &[String], state: &mut ParserState<'_>) -> P
     ParseOutcome::SectionParsed
 }
 
-/// An Expedition Logbook's area modifier block.
-///
-/// A logbook carries several areas, each with its own faction and its own
-/// modifiers. The stage appears three times in the pipeline, once per area,
-/// which is why it claims one section at a time.
 pub fn parse_logbook_area(section: &[String], state: &mut ParserState<'_>) -> ParseOutcome {
     if state.item.info.reference_name != "Expedition Logbook" {
         return ParseOutcome::ParserSkipped;
     }
 
-    // The reference requires three lines: the area name, the faction and at
-    // least one modifier.
     if section.len() < 3 {
         return ParseOutcome::SectionSkipped;
     }
@@ -128,7 +97,6 @@ pub fn parse_logbook_area(section: &[String], state: &mut ParserState<'_>) -> Pa
     let (stats, unknown) = match_stat_lines(section, state.data);
 
     if stats.is_empty() && unknown.len() == section.len() {
-        // Nothing matched at all, so this is not an area block.
         return ParseOutcome::SectionSkipped;
     }
 
@@ -145,11 +113,6 @@ pub fn parse_logbook_area(section: &[String], state: &mut ParserState<'_>) -> Pa
     ParseOutcome::SectionParsed
 }
 
-/// A Chronicle of Atzoatl's room list.
-///
-/// It prints `Open Rooms:` then a list, and optionally `Obstructed Rooms:`
-/// then another. The rooms are what the item is worth, so the block is
-/// recorded rather than merely consumed.
 pub fn parse_atzoatl_rooms(section: &[String], state: &mut ParserState<'_>) -> ParseOutcome {
     if state.item.info.reference_name != "Chronicle of Atzoatl" {
         return ParseOutcome::ParserSkipped;
@@ -189,19 +152,12 @@ pub fn parse_atzoatl_rooms(section: &[String], state: &mut ParserState<'_>) -> P
     ParseOutcome::SectionParsed
 }
 
-/// One room in a Chronicle of Atzoatl.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AtzoatlRoom {
     pub name: String,
-    /// Open rooms are usable. Obstructed ones need opening first and are worth
-    /// less.
     pub open: bool,
 }
 
-/// Set the fractured flag from the modifiers.
-///
-/// Ported from `parseFractured`. A fractured modifier cannot be removed, which
-/// changes what the item is worth, and the flag drives the query filter.
 pub fn parse_fractured(state: &mut ParserState<'_>) -> Result<(), ParseError> {
     if state
         .item
@@ -215,19 +171,11 @@ pub fn parse_fractured(state: &mut ParserState<'_>) -> Result<(), ParseError> {
     Ok(())
 }
 
-/// Work out whether a map is blighted from its implicit.
-///
-/// Ported from `parseBlightedMap`. The name prefix is stripped earlier, so on
-/// a map whose prefix was already removed the implicit is the only signal
-/// left.
-///
-/// A roll of nine means blight ravaged. Anything else means blighted.
 pub fn parse_blighted_map(state: &mut ParserState<'_>) -> Result<(), ParseError> {
     if state.item.category != Some(ItemCategory::Map) {
         return Ok(());
     }
 
-    // Already known from the name prefix. That signal is more direct.
     if state.item.map.blighted.is_some() {
         return Ok(());
     }
@@ -260,23 +208,10 @@ pub fn parse_blighted_map(state: &mut ParserState<'_>) -> Result<(), ParseError>
     Ok(())
 }
 
-/// Where the base's defensive roll sits inside its possible range.
-///
-/// Ported from `calcBasePercentile`.
-///
-/// One percentile covers every defence, because a base rolls them together.
-/// Armour is tried first, then evasion, then energy shield, because a larger
-/// number carries more precision and armour is usually the largest.
-///
-/// Needs the base's roll ranges, which come from the game bundles and are not
-/// in the trade API. Without them this reports nothing rather than guessing.
 pub fn calc_base_percentile(state: &mut ParserState<'_>) -> Result<(), ParseError> {
     let bounds = state.item.info.armour_bounds;
     let quality = f64::from(state.item.quality.unwrap_or(0));
 
-    // The modifiers have to be taken out before the base can be judged. An
-    // item with a big armour roll and a big armour modifier has an ordinary
-    // base, and reporting it as a good one is the whole failure this avoids.
     let totals = sum_stats_by_type(&state.item.modifiers);
 
     let pairs = [
@@ -369,10 +304,6 @@ mod tests {
         s
     }
 
-    // -----------------------------------------------------------------
-    // Mirrored Tablet
-    // -----------------------------------------------------------------
-
     #[test]
     fn a_mirrored_tablet_reads_every_line_as_its_own_modifier() {
         let data = table(&["# to maximum Life"]);
@@ -399,7 +330,6 @@ mod tests {
 
     #[test]
     fn a_short_section_on_a_mirrored_tablet_is_not_its_modifier_block() {
-        // The item level block would otherwise be read as modifiers.
         let data = table(&[]);
         let mut s = named(&data, "Mirrored Tablet");
 
@@ -420,14 +350,8 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------
-    // Filled Coffin
-    // -----------------------------------------------------------------
-
     #[test]
     fn a_filled_coffin_files_its_modifiers_under_necropolis() {
-        // They print with an implicit suffix. Reading them as implicits sends
-        // the query to the wrong namespace and it returns nothing.
         let data = table(&["# to maximum Life"]);
         let mut s = named(&data, "Filled Coffin");
 
@@ -461,10 +385,6 @@ mod tests {
             ParseOutcome::ParserSkipped
         );
     }
-
-    // -----------------------------------------------------------------
-    // Expedition Logbook
-    // -----------------------------------------------------------------
 
     #[test]
     fn a_logbook_area_block_is_read() {
@@ -506,14 +426,8 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------
-    // Chronicle of Atzoatl
-    // -----------------------------------------------------------------
-
     #[test]
     fn atzoatl_rooms_are_recorded_with_their_state() {
-        // The rooms are what the item is worth, so they are recorded rather
-        // than merely consumed.
         let data = table(&[]);
         let mut s = named(&data, "Chronicle of Atzoatl");
 
@@ -576,10 +490,6 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------
-    // Fractured
-    // -----------------------------------------------------------------
-
     fn modifier_of(kind: ModifierType) -> ParsedModifier {
         ParsedModifier {
             info: ModifierInfo {
@@ -592,8 +502,6 @@ mod tests {
 
     #[test]
     fn a_fractured_modifier_sets_the_item_flag() {
-        // It cannot be removed, which changes what the item is worth, and the
-        // flag drives the query filter.
         let data = table(&[]);
         let mut s = named(&data, "Spine Bow");
         s.item.modifiers.push(modifier_of(ModifierType::Fractured));
@@ -613,10 +521,6 @@ mod tests {
 
         assert!(!s.item.is_fractured);
     }
-
-    // -----------------------------------------------------------------
-    // Blighted maps
-    // -----------------------------------------------------------------
 
     fn infested(value: f64) -> ParsedModifier {
         ParsedModifier {
@@ -661,7 +565,6 @@ mod tests {
 
     #[test]
     fn the_name_prefix_wins_over_the_implicit() {
-        // The prefix is the more direct signal and was read earlier.
         let data = table(&[]);
         let mut s = named(&data, "Toxic Map");
         s.item.category = Some(ItemCategory::Map);
@@ -687,7 +590,6 @@ mod tests {
 
     #[test]
     fn an_explicit_infestation_modifier_does_not_count() {
-        // Only the implicit marks a blighted map.
         let data = table(&[]);
         let mut s = named(&data, "Toxic Map");
         s.item.category = Some(ItemCategory::Map);
@@ -700,10 +602,6 @@ mod tests {
 
         assert_eq!(s.item.map.blighted, None);
     }
-
-    // -----------------------------------------------------------------
-    // Base percentile
-    // -----------------------------------------------------------------
 
     #[test]
     fn a_base_roll_in_the_middle_of_its_range_is_the_fiftieth_percentile() {
@@ -725,8 +623,6 @@ mod tests {
 
     #[test]
     fn armour_is_preferred_over_evasion_and_energy_shield() {
-        // A base rolls its defences together, so one percentile covers them
-        // all. The largest number carries the most precision.
         let data = table(&[]);
         let mut s = named(&data, "Hybrid Base");
         s.item.armour = ArmourStats {
@@ -742,7 +638,6 @@ mod tests {
 
         calc_base_percentile(&mut s).unwrap();
 
-        // From armour, which is at the top of its range.
         assert_eq!(s.item.base_percentile, Some(100.0));
     }
 
@@ -780,13 +675,11 @@ mod tests {
 
         calc_base_percentile(&mut s).unwrap();
 
-        // 120 at 20 quality is 100 base, the bottom of the range.
         assert_eq!(s.item.base_percentile, Some(0.0));
     }
 
     #[test]
     fn a_base_with_no_known_range_reports_nothing_rather_than_guessing() {
-        // The ranges come from the game bundles and are not in the trade API.
         let data = table(&[]);
         let mut s = named(&data, "Iron Hat");
         s.item.armour = ArmourStats {

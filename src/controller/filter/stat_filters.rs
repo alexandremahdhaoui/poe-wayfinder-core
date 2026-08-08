@@ -1,16 +1,3 @@
-//! Turning matched stats into trade stat filters.
-//!
-//! Ported from `create-stat-filters.ts`.
-//!
-//! # Why most stats start disabled
-//!
-//! A rare has six modifiers and almost nobody wants all six. A query that
-//! requires all six returns the one listing that is this exact item, or none.
-//!
-//! So every stat filter travels with the query and starts disabled. The user
-//! enables the two or three that matter. The trade site shows the rest greyed
-//! out, ready to click.
-
 use crate::adapter::data_adapter::StatLookup;
 use crate::controller::aggregate::sum_stats_by_type;
 use crate::controller::filter::item_property::{armour_filters, weapon_filters};
@@ -23,20 +10,10 @@ use crate::types::modifier::ModifierType;
 use crate::types::query::{Range, StatFilter, StatGroup, StatGroupKind};
 use crate::types::stat::{StatBetter, StatRoll};
 
-/// How to build the stat filters.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StatFilterOptions {
-    /// Widen every roll by this fraction.
     pub roll_tolerance: f64,
-    /// Start every filter enabled.
-    ///
-    /// Off by default. A query that requires every modifier returns the one
-    /// listing that is this exact item.
     pub enable_all: bool,
-    /// What the item is, for the enable and hide rules.
-    ///
-    /// Without it every filter arrives disabled and the user switches on six
-    /// by hand, which is most of the work the tool exists to save.
     pub facts: ItemFacts,
 }
 
@@ -54,15 +31,6 @@ impl Default for StatFilterOptions {
     }
 }
 
-/// Build one stat group from an item's modifiers.
-///
-/// Stats are totalled across every modifier that grants them before a filter
-/// is built. A ring with life on a prefix and life from a craft has one life
-/// filter for the total, not two filters for the halves. Filtering on either
-/// half finds almost nothing, because the split across modifiers is random.
-///
-/// Returns nothing when no modifier maps to a trade id, because an empty group
-/// is a filter that matches everything and only slows the search.
 pub fn build_stat_group(
     modifiers: &[ParsedModifier],
     data: &dyn StatLookup,
@@ -71,12 +39,6 @@ pub fn build_stat_group(
     build_stat_group_for(modifiers, None, data, options)
 }
 
-/// Build the stat group, including the item's own numbers.
-///
-/// A weapon is bought for its damage per second and an armour piece for its
-/// largest defence. Neither is a modifier, so neither reaches the query
-/// through the modifier path, and a weapon search without a dps filter returns
-/// every weapon of that base.
 pub fn build_stat_group_for(
     modifiers: &[ParsedModifier],
     item: Option<&crate::types::item::ParsedItem>,
@@ -86,28 +48,12 @@ pub fn build_stat_group_for(
     build_stat_filters(modifiers, item, data, options).and
 }
 
-/// Every group an item's stats produce.
-///
-/// # Why one group is not enough
-///
-/// 376 PoE1 stats and 40 PoE2 stats have the same printed text and two trade
-/// ids. `#% chance to Impale Enemies on Hit with Attacks` is one of them.
-/// Nothing in the text says which id the listing will be filed under.
-///
-/// Sending the first and dropping the rest, which is what this did, is right
-/// about half the time and silently finds nothing the other half.
-///
-/// The reference sends those as a `count` group needing one match, so any of
-/// the ids satisfies it. That is what `counts` holds.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StatFilters {
-    /// The group where every filter must match.
     pub and: Option<StatGroup>,
-    /// One group per stat that has several trade ids.
     pub counts: Vec<StatGroup>,
 }
 
-/// Build the `and` group and any `count` groups.
 pub fn build_stat_filters(
     modifiers: &[ParsedModifier],
     item: Option<&crate::types::item::ParsedItem>,
@@ -137,13 +83,6 @@ pub fn build_stat_filters(
                 ),
             );
 
-            // A unique's defences are the unique's, not the base's. Every copy
-            // rolls the same modifiers, so requiring this one's numbers
-            // excludes every other copy that rolled a point lower.
-            //
-            // The filter still travels, so the trade site shows it greyed out
-            // and the user can switch it on. The parser reads the numbers; the
-            // decision about them is here.
             let unique = options.facts.is_unique;
 
             filter.disabled = !options.enable_all && (unique || !property.enabled);
@@ -156,12 +95,8 @@ pub fn build_stat_filters(
 
     let totals = sum_stats_by_type(modifiers);
 
-    // Pseudo totals first. They are what almost every real search is about,
-    // and the panel shows filters in the order they arrive.
     for pseudo in pseudo_totals(&totals) {
         let Some(hit) = data.stat_by_matcher(pseudo.reference) else {
-            // Our stat table is older than the pseudo rules. Skipping is
-            // right: sending a filter with no trade id fails the whole query.
             continue;
         };
 
@@ -174,9 +109,6 @@ pub fn build_stat_filters(
         };
 
         let mut filter = StatFilter::range(id, Range::default());
-        // A pseudo total's own rule decides, not the caller's enable_all.
-        // Turning every pseudo on at once returns the one listing that is this
-        // exact item.
         filter.disabled = pseudo.disabled && !options.enable_all;
         filter.range = bound_for(
             pseudo.roll,
@@ -188,12 +120,9 @@ pub fn build_stat_filters(
         filters.push(filter);
     }
 
-    // The explicit modifiers, kept for the fractured pass below.
     let mut explicit_matches: Vec<(String, StatFilter)> = Vec::new();
 
     for total in totals {
-        // The lookup is by the literal form the game printed, so the matched
-        // text is carried back from the modifier that produced the reference.
         let Some(matched) = matched_text(modifiers, &total.reference) else {
             continue;
         };
@@ -208,8 +137,6 @@ pub fn build_stat_filters(
 
         match built.alternates.is_empty() {
             true => filters.push(built.filter),
-            // Any one of the ids satisfies the search. Requiring all of them
-            // would require one listing to be filed under two ids at once.
             false => counts.push(StatGroup {
                 kind: StatGroupKind::Count,
                 value: Range {
@@ -238,6 +165,11 @@ pub fn build_stat_filters(
         ));
     }
 
+    let filters: Vec<StatFilter> = filters
+        .into_iter()
+        .filter(|filter| !is_property_id(&filter.id))
+        .collect();
+
     StatFilters {
         and: (!filters.is_empty()).then(|| StatGroup {
             filters,
@@ -247,28 +179,10 @@ pub fn build_stat_filters(
     }
 }
 
-/// A fractured copy of every explicit filter, when the item says it is
-/// fractured but no modifier admits to being the fractured one.
-///
-/// Ported from `missing-fractured-rules.ts`.
-///
-/// # The case this exists for
-///
-/// An item can print `Fractured Item` while none of its modifiers carries the
-/// fractured marker. That happens whenever Advanced Item Description is off,
-/// which is the default. We know one of the explicits is fractured and we have
-/// no way to tell which.
-///
-/// So every explicit is offered under its fractured trade id as well. The
-/// trade site matches whichever one really is fractured, and the buyer gets
-/// comparable items instead of none.
-///
-/// A fractured modifier cannot be changed by any craft, which is most of what
-/// a fractured item is worth. Without this a fractured item copied the normal
-/// way carried no fractured filter at all.
-///
-/// The copies are disabled, like the explicit filters they came from. Turning
-/// them all on would demand every modifier be fractured, and only one is.
+pub fn is_property_id(id: &str) -> bool {
+    id.starts_with("item.")
+}
+
 fn missing_fractured_filters(
     item: &crate::types::item::ParsedItem,
     modifiers: &[ParsedModifier],
@@ -279,8 +193,6 @@ fn missing_fractured_filters(
         return Vec::new();
     }
 
-    // A modifier already marked fractured means the game told us which one,
-    // and guessing on top of that would ask for two fractured modifiers.
     if modifiers
         .iter()
         .any(|m| m.info.kind == Some(ModifierType::Fractured))
@@ -301,8 +213,6 @@ fn missing_fractured_filters(
 
             let mut copy = filter.clone();
             copy.id = id.clone();
-            // Never enabled by default. Only one of these is really the
-            // fractured modifier and requiring all of them matches nothing.
             copy.disabled = true;
 
             Some(copy)
@@ -310,15 +220,6 @@ fn missing_fractured_filters(
         .collect()
 }
 
-/// One filter per influence the item carries.
-///
-/// The trade site indexes influence under `pseudo` rather than as a modifier,
-/// so it never reaches the query through the modifier path. PoE1 only. A PoE2
-/// item carries no influence and this returns nothing for it.
-///
-/// Off by default, like every other filter the user did not ask for. An
-/// influenced base is still an ordinary base and the buyer decides whether the
-/// influence is the point.
 fn influence_filters(
     influences: &[crate::types::item::Influence],
     data: &dyn StatLookup,
@@ -330,8 +231,6 @@ fn influence_filters(
         let reference = crate::controller::filter::influence::stat_reference(*influence);
 
         let Some(hit) = data.stat_by_matcher(reference) else {
-            // A PoE2 data file has no such stat. Nothing to send and nothing
-            // wrong.
             continue;
         };
 
@@ -353,11 +252,6 @@ fn influence_filters(
     out
 }
 
-/// The literal form the game printed for a stat.
-///
-/// The total carries the canonical reference. The data lookup is keyed by the
-/// literal form, so the first modifier that produced this reference supplies
-/// it.
 fn matched_text(modifiers: &[ParsedModifier], reference: &str) -> Option<String> {
     modifiers
         .iter()
@@ -366,15 +260,12 @@ fn matched_text(modifiers: &[ParsedModifier], reference: &str) -> Option<String>
         .map(|s| s.matched.clone())
 }
 
-/// One built filter and the other ids the same stat is filed under.
 #[derive(Debug, Clone, PartialEq)]
 struct BuiltFilter {
     filter: StatFilter,
-    /// Empty for almost every stat. See `StatFilters` for the rest.
     alternates: Vec<String>,
 }
 
-/// Build one stat filter.
 fn build_one(
     matched: &str,
     roll: Option<StatRoll>,
@@ -384,8 +275,6 @@ fn build_one(
 ) -> Option<BuiltFilter> {
     let hit = data.stat_by_matcher(matched)?;
 
-    // An added rune is filed under rune on the trade site. Looking up
-    // "added-rune" finds nothing and the filter is silently dropped.
     let lookup_kind = match kind {
         ModifierType::AddedAugment => ModifierType::Augment,
         other => other,
@@ -393,12 +282,8 @@ fn build_one(
 
     let ids = hit.stat.trade.ids_for(lookup_kind)?;
     let id = ids.first()?;
-    // The rest of them, when the same text is filed under several ids. See
-    // `StatFilters`.
     let alternates: Vec<String> = ids.iter().skip(1).cloned().collect();
 
-    // A unique's fixed stat narrows nothing and fills the panel with a row
-    // nobody clicks.
     let hidden = hidden_reason(matched, roll, options.facts);
 
     if hidden.is_some() {
@@ -407,19 +292,13 @@ fn build_one(
 
     let mut filter = StatFilter::range(id, Range::default());
 
-    // A modifier that rolled near the top of its range is why the item is
-    // worth anything. One that rolled badly is noise, and enabling it excludes
-    // every item that rolled it worse.
     filter.disabled =
         !options.enable_all && !should_enable(roll, hit.stat.better, hidden, GOOD_ROLL_THRESHOLD);
 
     let Some(roll) = roll else {
-        // A stat with no roll is a presence check. It needs no range.
         return Some(BuiltFilter { filter, alternates });
     };
 
-    // A stat the trade site stores as an option takes the option and no range.
-    // Sending a range on one returns nothing.
     if hit.stat.trade.option {
         filter.option = roll.option.or(Some(roll.value));
 
@@ -431,22 +310,14 @@ fn build_one(
     Some(BuiltFilter { filter, alternates })
 }
 
-/// Decide which end of the roll to constrain.
-///
-/// A resistance is better high, so the filter is a floor. An attribute
-/// requirement is better low, so it is a ceiling. Constraining the wrong end
-/// returns every item worse than this one.
 fn bound_for(
     roll: StatRoll,
     better: StatBetter,
     inverted: bool,
     options: StatFilterOptions,
 ) -> Range {
-    // The trade site stores some stats with the opposite sign, so the value it
-    // will compare against is negated.
     let value = if inverted { -roll.value } else { roll.value };
 
-    // Inverting also flips which end is better.
     let effective = match (better, inverted) {
         (StatBetter::PositiveRoll, true) => StatBetter::NegativeRoll,
         (StatBetter::NegativeRoll, true) => StatBetter::PositiveRoll,
@@ -458,15 +329,10 @@ fn bound_for(
     match effective {
         StatBetter::PositiveRoll => Range::at_least(widened),
         StatBetter::NegativeRoll => Range::at_most(widened),
-        // No direction means no useful bound. The filter is a presence check.
         StatBetter::NotComparable => Range::default(),
     }
 }
 
-/// Move a value away from the roll by the tolerance, in the helpful direction.
-///
-/// Rounded to one decimal so a value that renders with one decimal still
-/// matches itself.
 fn widen(value: f64, tolerance: f64, better: StatBetter) -> f64 {
     let magnitude = value.abs() * tolerance;
 
@@ -611,9 +477,6 @@ mod tests {
 
     #[test]
     fn a_stat_with_two_trade_ids_travels_as_a_count_group() {
-        // 376 PoE1 stats share one text across two ids. Nothing in the text
-        // says which one a listing is filed under, so requiring the first
-        // silently finds nothing about half the time.
         let got = build_stat_filters(
             &impale(),
             None,
@@ -627,8 +490,6 @@ mod tests {
 
     #[test]
     fn a_count_group_needs_only_one_of_the_ids() {
-        // No listing is filed under both at once, so requiring both matches
-        // nothing at all.
         let got = build_stat_filters(
             &impale(),
             None,
@@ -659,8 +520,6 @@ mod tests {
 
     #[test]
     fn every_id_in_a_count_group_carries_the_same_roll() {
-        // They are one stat printed one way. A range on only the first would
-        // let the second match any roll.
         let got = build_stat_filters(
             &impale(),
             None,
@@ -677,8 +536,6 @@ mod tests {
 
     #[test]
     fn a_stat_with_two_ids_is_not_also_in_the_and_group() {
-        // It would then be required as well as counted, which is the bug the
-        // count group exists to avoid.
         let got = build_stat_filters(
             &impale(),
             None,
@@ -705,8 +562,6 @@ mod tests {
 
     #[test]
     fn an_influenced_base_gets_a_filter_on_its_influence() {
-        // The trade site files influence under pseudo, so it never reaches the
-        // query through the modifier path. PoE1 had no influence filter at all.
         let item = influenced(vec![crate::types::item::Influence::Shaper]);
 
         let group = build_stat_group_for(
@@ -723,8 +578,6 @@ mod tests {
 
     #[test]
     fn an_influence_filter_starts_off() {
-        // An influenced base is still an ordinary base. The buyer decides
-        // whether the influence is the point.
         let item = influenced(vec![crate::types::item::Influence::Shaper]);
 
         let group = build_stat_group_for(
@@ -772,8 +625,6 @@ mod tests {
 
     #[test]
     fn an_influence_the_data_does_not_know_sends_nothing() {
-        // A PoE2 data file has no influence stats. Sending a filter with no
-        // trade id fails the whole query, so nothing is the right answer.
         let item = influenced(vec![crate::types::item::Influence::Hunter]);
 
         let group = build_stat_group_for(
@@ -785,14 +636,6 @@ mod tests {
 
         assert!(group.is_none());
     }
-
-    // -----------------------------------------------------------------
-    // The missing fractured rule, from missing-fracture-rules.test.ts
-    //
-    // Three of the reference's four cases are vacuous: they compare the array
-    // against a copy taken after the call, which is always equal. Only the
-    // fourth asserts anything, so the rest are written here properly.
-    // -----------------------------------------------------------------
 
     fn fracture_table() -> FakeStats {
         let mut life = TradeInfo::default();
@@ -831,12 +674,6 @@ mod tests {
 
     #[test]
     fn a_fractured_item_offers_every_explicit_as_fractured_too() {
-        // The reference's only real case: two explicits become two more
-        // filters tagged fractured, four in total.
-        //
-        // The item says "Fractured Item" and no modifier admits to being the
-        // fractured one, which is what happens with Advanced Item Description
-        // off. One of them is; we cannot tell which, so all are offered.
         let item = fractured_item(true);
 
         let group = build_stat_group_for(
@@ -859,8 +696,6 @@ mod tests {
 
     #[test]
     fn an_unfractured_item_offers_no_fractured_filters() {
-        // Offering them would search a market this item is not in. Fractured
-        // items are worth more, so the price would read high.
         let item = fractured_item(false);
 
         let group = build_stat_group_for(
@@ -876,8 +711,6 @@ mod tests {
 
     #[test]
     fn an_item_whose_fractured_modifier_is_marked_gets_no_guesses() {
-        // The game already told us which one. Adding guesses on top would ask
-        // for two fractured modifiers on an item that has one.
         let item = fractured_item(true);
 
         let mut modifiers = two_explicits();
@@ -906,8 +739,6 @@ mod tests {
 
     #[test]
     fn a_guessed_fractured_filter_starts_off() {
-        // Only one of them is really fractured. Enabling them all would
-        // require every modifier to be fractured and match nothing.
         let item = fractured_item(true);
 
         let group = build_stat_group_for(
@@ -929,7 +760,6 @@ mod tests {
 
     #[test]
     fn a_stat_with_no_fractured_id_is_not_guessed_at() {
-        // Sending an id the trade site does not know fails the whole query.
         let mut trade = TradeInfo::default();
         trade
             .ids
@@ -976,8 +806,6 @@ mod tests {
 
     #[test]
     fn a_badly_rolled_modifier_starts_disabled() {
-        // Enabling it excludes every item that rolled it worse, which is most
-        // of them.
         let poor = Some(StatRoll {
             value: 55.0,
             min: 50.0,
@@ -994,8 +822,6 @@ mod tests {
 
     #[test]
     fn a_well_rolled_modifier_starts_enabled() {
-        // It is why the item is worth anything, and leaving every filter off
-        // means the user switches on six by hand.
         let good = Some(StatRoll {
             value: 98.0,
             min: 50.0,
@@ -1012,8 +838,6 @@ mod tests {
 
     #[test]
     fn a_uniques_fixed_stat_yields_no_filter_at_all() {
-        // Filtering on it narrows nothing and fills the panel with a row
-        // nobody clicks.
         let options = StatFilterOptions {
             facts: crate::controller::filter::rules::ItemFacts {
                 is_unique: true,
@@ -1065,7 +889,6 @@ mod tests {
 
     #[test]
     fn a_stat_that_is_better_low_gets_a_ceiling() {
-        // Constraining the wrong end returns every item worse than this one.
         let table = FakeStats {
             stats: vec![stat_with(
                 "# to Strength Requirement",
@@ -1087,7 +910,6 @@ mod tests {
 
     #[test]
     fn a_stat_with_no_direction_gets_no_bound() {
-        // Guessing a direction would filter out items that are better.
         let table = FakeStats {
             stats: vec![stat_with(
                 "Grants Skill: #",
@@ -1108,8 +930,6 @@ mod tests {
 
     #[test]
     fn an_inverted_stat_has_its_sign_and_its_direction_flipped() {
-        // The trade site stores these with the opposite sign, so both the
-        // value and which end is better have to flip together.
         let mut trade = trade_with("explicit", "explicit.stat_inv");
         trade.inverted = true;
 
@@ -1128,14 +948,12 @@ mod tests {
 
         let group = build_stat_group(&mods, &table, StatFilterOptions::default()).unwrap();
 
-        // Value becomes -20, direction becomes better low, so a ceiling.
         assert_eq!(group.filters[0].range.max, Some(-18.0));
         assert_eq!(group.filters[0].range.min, None);
     }
 
     #[test]
     fn an_option_stat_sends_an_option_and_no_range() {
-        // Sending a range on an option stat returns nothing.
         let mut trade = trade_with("explicit", "explicit.stat_opt");
         trade.option = true;
 
@@ -1193,7 +1011,6 @@ mod tests {
 
     #[test]
     fn the_filter_uses_the_namespace_the_modifier_came_from() {
-        // The same stat has a different id as an implicit than as an explicit.
         let mut trade = trade_with("explicit", "explicit.stat_life");
         trade
             .ids
@@ -1234,8 +1051,6 @@ mod tests {
 
     #[test]
     fn an_added_rune_is_filed_under_rune() {
-        // The trade site has no added-rune namespace. Looking one up finds
-        // nothing and the filter is silently dropped.
         let table = FakeStats {
             stats: vec![stat_with(
                 "# to maximum Life",
@@ -1260,7 +1075,6 @@ mod tests {
 
     #[test]
     fn a_stat_with_no_id_in_its_namespace_is_dropped() {
-        // Sending a filter with no id makes the whole query fail.
         let table = FakeStats {
             stats: vec![stat_with(
                 "# to maximum Life",
@@ -1299,7 +1113,6 @@ mod tests {
 
     #[test]
     fn a_modifier_with_no_type_is_dropped() {
-        // Without a type there is no namespace and no id to send.
         let mods = vec![ParsedModifier {
             info: ModifierInfo::default(),
             stats: vec![ParsedStat {
@@ -1314,15 +1127,11 @@ mod tests {
 
     #[test]
     fn an_item_with_no_modifiers_yields_no_group() {
-        // An empty group matches everything and only slows the search.
         assert!(build_stat_group(&[], &life_table(), StatFilterOptions::default()).is_none());
     }
 
     #[test]
     fn two_modifiers_of_one_stat_become_one_filter_on_the_total() {
-        // A ring with life on a prefix and life from a craft has 35 life. Two
-        // filters for 20 and 15 find almost nothing, because the split across
-        // modifiers is random.
         let mods = vec![
             modifier(ModifierType::Explicit, "# to maximum Life", roll(20.0)),
             modifier(ModifierType::Crafted, "# to maximum Life", roll(15.0)),
@@ -1331,7 +1140,6 @@ mod tests {
         let group = build_stat_group(&mods, &life_table(), StatFilterOptions::default()).unwrap();
 
         assert_eq!(group.filters.len(), 1);
-        // 35 minus ten percent.
         assert_eq!(group.filters[0].range.min, Some(31.5));
     }
 
@@ -1379,8 +1187,6 @@ mod tests {
 
     #[test]
     fn a_negative_roll_widens_away_from_zero_in_the_helpful_direction() {
-        // A negative resistance is still better high, so the floor has to go
-        // further negative and not closer to zero.
         let mods = vec![modifier(
             ModifierType::Explicit,
             "# to maximum Life",

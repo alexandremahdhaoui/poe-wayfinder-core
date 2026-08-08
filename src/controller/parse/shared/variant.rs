@@ -1,60 +1,26 @@
-//! Choosing between bases that share a name.
-//!
-//! Ported from `pickCorrectVariant` in `renderer/src/parser/Parser.ts`.
-//!
-//! # Why one name can be several bases
-//!
-//! A Two-Stone Ring is fire and cold, or fire and lightning, or cold and
-//! lightning. All three print the same name and only the implicit tells them
-//! apart. The trade site treats them as three separate items, so sending the
-//! bare name searches all three and prices the wrong one two times in three.
-//!
-//! The data file marks each with a discriminator and a condition. This picks
-//! the variant whose condition the item satisfies.
-
 use crate::controller::parse::{ParseError, ParserState};
 use crate::types::item::BaseInfo;
 use crate::types::modifier::ModifierType;
 
-/// A condition that tells one variant from another.
-///
-/// Every field is optional and all present fields must hold. An empty
-/// condition matches everything, which makes it a fallback rather than a
-/// choice.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Discriminator {
-    /// The item must have an armour rating.
     pub prop_ar: bool,
-    /// The item must have an evasion rating.
     pub prop_ev: bool,
-    /// The item must have energy shield.
     pub prop_es: bool,
-    /// The item must carry this implicit.
     pub has_implicit: Option<String>,
-    /// The item must carry this explicit.
     pub has_explicit: Option<String>,
-    /// The item text must contain this.
     pub section_text: Option<String>,
-    /// The map tier band.
     pub map_tier: Option<MapTierBand>,
 }
 
-/// Which tier band a map variant covers.
-///
-/// The game reuses one map name across three tier bands and the trade site
-/// files each separately.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MapTierBand {
-    /// White. Tier 5 and below.
     White,
-    /// Yellow. Tiers 6 to 10.
     Yellow,
-    /// Red. Tier 11 and above.
     Red,
 }
 
 impl MapTierBand {
-    /// Read the single letter the data file uses.
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "W" => Some(MapTierBand::White),
@@ -64,7 +30,6 @@ impl MapTierBand {
         }
     }
 
-    /// Whether a tier falls in this band.
     pub fn contains(self, tier: u32) -> bool {
         match self {
             MapTierBand::White => tier <= 5,
@@ -75,11 +40,6 @@ impl MapTierBand {
 }
 
 impl Discriminator {
-    /// Whether an item satisfies this condition.
-    ///
-    /// A condition on a property the item does not have fails. A tier
-    /// condition on an item with no tier fails too, because a map variant
-    /// cannot be chosen without knowing the tier.
     pub fn matches(&self, state: &ParserState<'_>) -> bool {
         let item = &state.item;
 
@@ -127,7 +87,6 @@ impl Discriminator {
     }
 }
 
-/// Whether the item carries a stat under a namespace.
 fn has_stat(state: &ParserState<'_>, reference: &str, kind: ModifierType) -> bool {
     state
         .item
@@ -136,15 +95,6 @@ fn has_stat(state: &ParserState<'_>, reference: &str, kind: ModifierType) -> boo
         .any(|m| m.info.kind == Some(kind) && m.stats.iter().any(|s| s.reference == reference))
 }
 
-/// Choose the right variant from the candidates.
-///
-/// Returns the last candidate whose condition holds, matching the reference,
-/// which keeps assigning rather than breaking on the first match. A later
-/// entry in the data file is therefore more specific by convention.
-///
-/// Returns None when nothing matches, and the caller keeps what it had. A
-/// wrong variant is worse than an unspecific one: it searches an item the user
-/// does not have.
 pub fn choose_variant<'a>(
     state: &ParserState<'_>,
     candidates: &'a [(BaseInfo, Discriminator)],
@@ -160,11 +110,6 @@ pub fn choose_variant<'a>(
     chosen
 }
 
-/// Pick the variant and record it on the item.
-///
-/// A no-op today because the data file the trade API gives us carries no
-/// conditions. It is wired into the pipeline so that vendoring the bundle
-/// tables is a data change and not a code change.
 pub fn pick_correct_variant(state: &mut ParserState<'_>) -> Result<(), ParseError> {
     let candidates = state.variants.clone();
 
@@ -216,7 +161,6 @@ mod tests {
 
     #[test]
     fn an_empty_condition_matches_anything() {
-        // It is a fallback, not a choice.
         assert!(Discriminator::default().matches(&state()));
     }
 
@@ -256,8 +200,6 @@ mod tests {
 
     #[test]
     fn an_implicit_condition_needs_that_implicit() {
-        // This is what tells a fire and cold Two-Stone Ring from a fire and
-        // lightning one.
         let condition = Discriminator {
             has_implicit: Some("#% to Fire and Cold Resistances".into()),
             ..Discriminator::default()
@@ -276,7 +218,6 @@ mod tests {
 
     #[test]
     fn the_namespace_of_the_condition_is_checked() {
-        // The same stat as an explicit is a different item.
         let condition = Discriminator {
             has_implicit: Some("#% to Fire and Cold Resistances".into()),
             ..Discriminator::default()
@@ -323,8 +264,6 @@ mod tests {
 
     #[test]
     fn the_bands_cover_every_tier_exactly_once() {
-        // A gap would leave a map with no variant. An overlap would make the
-        // choice depend on file order.
         for tier in 0..=20 {
             let hits = [MapTierBand::White, MapTierBand::Yellow, MapTierBand::Red]
                 .iter()
@@ -345,8 +284,6 @@ mod tests {
 
     #[test]
     fn a_tier_condition_on_an_item_with_no_tier_fails() {
-        // A map variant cannot be chosen without knowing the tier, and
-        // guessing would search an item the user does not have.
         let condition = Discriminator {
             map_tier: Some(MapTierBand::Red),
             ..Discriminator::default()
@@ -385,7 +322,6 @@ mod tests {
             ..ArmourStats::default()
         };
 
-        // Armour holds, the implicit does not.
         assert!(!condition.matches(&s));
     }
 
@@ -424,8 +360,6 @@ mod tests {
 
     #[test]
     fn nothing_is_chosen_when_no_condition_holds() {
-        // A wrong variant is worse than an unspecific one: it searches an item
-        // the user does not have.
         let candidates = vec![(
             base("fire_cold"),
             Discriminator {
@@ -439,8 +373,6 @@ mod tests {
 
     #[test]
     fn the_last_matching_variant_wins() {
-        // Matching the reference, which keeps assigning rather than breaking.
-        // A later entry is more specific by convention.
         let candidates = vec![
             (base("first"), Discriminator::default()),
             (base("second"), Discriminator::default()),

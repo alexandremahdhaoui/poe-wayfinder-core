@@ -1,18 +1,8 @@
-//! Matching a stat line to a stat, and reading its roll.
-//!
-//! Ported from `tryParseTranslation` and `parseRoll` in
-//! `renderer/src/parser/stat-translations.ts`.
-
 use crate::adapter::data_adapter::{StatLookup, TradeStatLookup};
 use crate::controller::stat_match::placeholder::{candidates, Candidate, NumMatch, StatString};
 use crate::types::stat::{ParsedStat, StatHit, StatRoll};
 use crate::util::number::roll_or_minmax_avg;
 
-/// Match a stat line and read its roll.
-///
-/// Candidates are tried in order and the first one the data recognises wins.
-/// That order is why a stat whose number belongs to its name matches before
-/// the generic form.
 pub fn try_parse_translation(stat: &StatString, data: &dyn StatLookup) -> Option<ParsedStat> {
     for candidate in candidates(&stat.string) {
         let Some(hit) = data.stat_by_matcher(&candidate.template) else {
@@ -29,20 +19,6 @@ pub fn try_parse_translation(stat: &StatString, data: &dyn StatLookup) -> Option
     None
 }
 
-/// Match a stat line against the trade site's own list when our data misses.
-///
-/// Ported from `trySecondaryParseTranslation`.
-///
-/// # Why there is a second attempt at all
-///
-/// Our stat table is built from the game's own wordings. The trade site keeps
-/// its own list and adds new stats there first, so a league's new modifier is
-/// searchable days before our table knows the wording.
-///
-/// The fallback takes the line as written and asks the trade list directly. It
-/// gives no roll, because a stat matched by its whole text has no placeholder
-/// to read a number out of. A filter on its presence is still worth more than
-/// dropping the modifier as unknown.
 pub fn try_secondary_parse_translation(
     text: &str,
     data: &dyn TradeStatLookup,
@@ -52,23 +28,15 @@ pub fn try_secondary_parse_translation(
     }
 
     Some(ParsedStat {
-        // The line itself is the reference. There is no canonical form to map
-        // to, which is the whole reason this path exists.
         reference: text.to_string(),
         matched: text.to_string(),
         roll: None,
     })
 }
 
-/// Read the roll a candidate placeheld.
-///
-/// Returns None when the candidate placeheld nothing and the matcher bakes no
-/// value in, which means the stat has no roll to filter on.
 pub fn parse_roll(hit: &StatHit, candidate: &Candidate, stat: &StatString) -> Option<StatRoll> {
     let mut values = candidate.values.clone();
 
-    // The game prints some stats as a reduction with a positive number. Miss
-    // this and the sign on the whole filter flips.
     if hit.matcher.negate {
         for v in &mut values {
             v.roll = -v.roll;
@@ -79,7 +47,6 @@ pub fn parse_roll(hit: &StatHit, candidate: &Candidate, stat: &StatString) -> Op
         }
     }
 
-    // A charge counter's floor is one use and the game does not say so.
     if hit.stat.reference == "# uses remaining" {
         if let Some(first) = values.first_mut() {
             let max = first.bounds.map_or(first.roll, |(_, max)| max);
@@ -89,8 +56,6 @@ pub fn parse_roll(hit: &StatHit, candidate: &Candidate, stat: &StatString) -> Op
 
     let legacy = normalise_bounds(&mut values);
 
-    // A matcher that bakes its value in has no placeholder to read, so the
-    // baked value is the roll.
     if values.is_empty() {
         let baked = hit.matcher.value?;
 
@@ -128,10 +93,6 @@ pub fn parse_roll(hit: &StatHit, candidate: &Candidate, stat: &StatString) -> Op
     })
 }
 
-/// Put every bound the right way round and widen it to fit the roll.
-///
-/// Returns whether any roll fell outside its stated range, which makes the
-/// item legacy.
 fn normalise_bounds(values: &mut [NumMatch]) -> bool {
     let mut legacy = false;
 
@@ -140,15 +101,10 @@ fn normalise_bounds(values: &mut [NumMatch]) -> bool {
             continue;
         };
 
-        // Negating a range swaps its ends. So does a legacy modifier that
-        // shares its translation with a newer one. Neither is a legacy roll on
-        // its own, so this swap does not set the flag.
         if min > max {
             std::mem::swap(&mut min, &mut max);
         }
 
-        // A roll outside its stated range means the item predates a balance
-        // change. It cannot be crafted again, so the UI has to say so.
         if v.roll > max {
             max = v.roll;
             legacy = true;
@@ -170,10 +126,6 @@ mod tests {
     use super::*;
     use crate::types::stat::{Stat, StatMatcher};
 
-    /// A stat table backed by a fixed list.
-    ///
-    /// Hand written rather than mocked. The trait has one method and a fake
-    /// that holds real stats reads better than an expectation script.
     struct FakeStats {
         stats: Vec<Stat>,
     }
@@ -258,8 +210,6 @@ mod tests {
 
     #[test]
     fn a_roll_above_its_stated_range_is_legacy() {
-        // The item predates a balance change. It cannot be crafted again and
-        // is usually worth more, so the UI has to say so.
         let got =
             try_parse_translation(&line("+40(20-30) to maximum Life"), &life_table()).unwrap();
 
@@ -280,8 +230,6 @@ mod tests {
 
     #[test]
     fn a_backwards_range_is_swapped_and_is_not_legacy() {
-        // A legacy modifier can share a translation with a newer one and print
-        // its bounds the other way round. That is not a legacy roll.
         let got =
             try_parse_translation(&line("+25(30-20) to maximum Life"), &life_table()).unwrap();
 
@@ -293,8 +241,6 @@ mod tests {
 
     #[test]
     fn a_negating_matcher_flips_the_sign() {
-        // "10% reduced Attack Speed" is the same stat as -10% increased. Miss
-        // this and the filter asks for the opposite of what the item has.
         let table = FakeStats {
             stats: vec![stat(
                 "#% increased Attack Speed",
@@ -328,7 +274,6 @@ mod tests {
 
         let roll = got.roll.unwrap();
         assert_eq!(roll.value, -10.0);
-        // Negating swaps the ends, and normalising puts them back in order.
         assert_eq!(roll.min, -15.0);
         assert_eq!(roll.max, -5.0);
         assert!(!roll.legacy);
@@ -336,8 +281,6 @@ mod tests {
 
     #[test]
     fn a_matcher_that_bakes_its_value_in_reports_that_value() {
-        // "Adds 1 Passive Skill" carries no placeholder because the value is
-        // always one. Reporting no roll would drop the filter entirely.
         let table = FakeStats {
             stats: vec![stat(
                 "Adds # Passive Skills",
@@ -402,8 +345,6 @@ mod tests {
 
     #[test]
     fn a_literal_match_beats_the_placeheld_one() {
-        // Both forms are in the table. The literal has to win or every gem
-        // reads its granted skill level as a roll.
         let table = FakeStats {
             stats: vec![
                 stat(
@@ -440,8 +381,6 @@ mod tests {
 
     #[test]
     fn a_charge_counter_gets_a_floor_of_one_use() {
-        // The game prints no lower bound. Without the floor the range reads as
-        // a point and the item looks unusable.
         let table = FakeStats {
             stats: vec![stat("# uses remaining", vec![plain("# uses remaining")])],
         };
@@ -481,8 +420,6 @@ mod tests {
 
     #[test]
     fn a_stat_marked_decimal_in_the_data_sets_the_flag_on_a_whole_roll() {
-        // The trade site expects two decimal places for these whether or not
-        // the game printed any.
         let table = FakeStats {
             stats: vec![Stat {
                 reference: "#% of Damage Leeched".into(),
@@ -499,7 +436,6 @@ mod tests {
 
     #[test]
     fn the_matched_literal_form_is_reported_alongside_the_reference() {
-        // The UI shows what the item says. The query uses the reference.
         let table = FakeStats {
             stats: vec![stat(
                 "#% increased Attack Speed",
@@ -517,10 +453,6 @@ mod tests {
         assert_eq!(got.matched, "#% reduced Attack Speed");
     }
 
-    // -----------------------------------------------------------------
-    // The trade list fallback
-    // -----------------------------------------------------------------
-
     struct FakeTradeStats {
         known: Vec<&'static str>,
     }
@@ -533,8 +465,6 @@ mod tests {
 
     #[test]
     fn a_stat_the_trade_site_knows_is_matched_by_its_whole_text() {
-        // A league's new modifier is searchable days before our table knows
-        // its wording.
         let data = FakeTradeStats {
             known: vec!["+15% to Brand New Resistance"],
         };
@@ -548,9 +478,6 @@ mod tests {
 
     #[test]
     fn the_fallback_gives_no_roll() {
-        // A stat matched by its whole text has no placeholder to read a number
-        // out of, and inventing one would send a filter for a value the item
-        // may not have.
         let data = FakeTradeStats {
             known: vec!["+15% to Brand New Resistance"],
         };
@@ -570,8 +497,6 @@ mod tests {
 
     #[test]
     fn the_match_is_exact() {
-        // A near match is a different stat with a different trade id, and the
-        // filter would search for something the item does not have.
         let data = FakeTradeStats {
             known: vec!["+15% to Brand New Resistance"],
         };

@@ -1,40 +1,16 @@
-//! The name plate.
-//!
-//! Ported from `parseNamePlate` and `markupConditionParser` in
-//! `renderer/src/parser/Parser.ts`.
-//!
-//! Section zero holds up to four lines.
-//!
-//! ```text
-//! Item Class: Bows
-//! Rarity: Rare
-//! Doom Fletch
-//! Spine Bow
-//! ```
-//!
-//! The class line is always first. The rarity line is optional. What follows is
-//! the name, then the base type when the item has one.
-
 use crate::types::category::ItemCategory;
 use crate::types::client_strings as cs;
 use crate::types::item::{ItemRarity, ParsedItem};
 
 use super::ParseError;
 
-/// What the name plate yielded.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NamePlate {
     pub item: ParsedItem,
-    /// The item's own name. Always present.
     pub name: String,
-    /// The base type line. Absent on normal items and on currency.
     pub base_type: Option<String>,
 }
 
-/// Rarity lines that name a category rather than a rarity.
-///
-/// Currency, divination cards and gems have no rarity of their own, so the
-/// game reuses the rarity line to say what they are.
 fn category_from_rarity_text(text: &str) -> Option<ItemCategory> {
     match text {
         cs::RARITY_CURRENCY => Some(ItemCategory::Currency),
@@ -44,10 +20,6 @@ fn category_from_rarity_text(text: &str) -> Option<ItemCategory> {
     }
 }
 
-/// Rarity lines that really are a rarity.
-///
-/// A quest item reads as Normal. The trade site has no quest rarity and quest
-/// items are not tradeable, so folding them into Normal loses nothing.
 fn rarity_from_rarity_text(text: &str) -> Option<ItemRarity> {
     match text {
         cs::RARITY_NORMAL | cs::RARITY_QUEST => Some(ItemRarity::Normal),
@@ -58,25 +30,16 @@ fn rarity_from_rarity_text(text: &str) -> Option<ItemRarity> {
     }
 }
 
-/// Read section zero.
-///
-/// Fails when the class line is missing, because every later stage assumes the
-/// remaining lines line up.
 pub fn parse_name_plate(section: &[String]) -> Result<NamePlate, ParseError> {
     let mut lines = section.iter();
 
     let class_line = lines.next().ok_or(ParseError::BadNamePlate)?;
 
-    // A meta gem prints no item class line at all, so its rarity line comes
-    // first. Rejecting it would make every meta gem unparseable.
     if is_missing_item_class(section) {
         return parse_without_class_line(section);
     }
 
     if !class_line.starts_with(cs::ITEM_CLASS) {
-        // A rarity line in another language is the common cause. Saying so
-        // beats a generic parse failure, because the fix is to change the game
-        // client language and nothing about this app.
         if section.iter().any(|l| looks_like_a_foreign_rarity_line(l)) {
             return Err(ParseError::WrongLanguage);
         }
@@ -84,15 +47,6 @@ pub fn parse_name_plate(section: &[String]) -> Result<NamePlate, ParseError> {
         return Err(ParseError::BadNamePlate);
     }
 
-    // The class line names the category for every item the game prints.
-    //
-    // The data file only covers the bases the trade API names finely, which is
-    // 810 of 3578. Without this a bow has no category, so the search carries no
-    // category filter and returns every item of every kind that happens to
-    // share a modifier.
-    //
-    // The database stage overwrites this when the data file has an answer,
-    // because the data file knows things the class line cannot say.
     let mut item = ParsedItem {
         category: class_line
             .strip_prefix(cs::ITEM_CLASS)
@@ -106,8 +60,6 @@ pub fn parse_name_plate(section: &[String]) -> Result<NamePlate, ParseError> {
         if let Some(rarity_text) = line.strip_prefix(cs::RARITY) {
             item.rarity = rarity_from_rarity_text(rarity_text);
 
-            // A rarity that names a category wins. "Rarity: Currency" is more
-            // specific than the class line for the things that print it.
             if let Some(category) = category_from_rarity_text(rarity_text) {
                 item.category = Some(category);
             }
@@ -126,15 +78,6 @@ pub fn parse_name_plate(section: &[String]) -> Result<NamePlate, ParseError> {
     })
 }
 
-/// Whether the item printed no class line.
-///
-/// Ported from `isItemMissingItemClass`. A meta gem is the only item that does
-/// this, and the signal is a short first section whose first line is the
-/// rarity.
-///
-/// The length bound matters. A longer section starting with a rarity line is a
-/// normal item whose class line is missing for a different reason, and reading
-/// it this way would misalign every line after it.
 pub fn is_missing_item_class(section: &[String]) -> bool {
     if section.len() > 3 || section.len() < 2 {
         return false;
@@ -143,10 +86,6 @@ pub fn is_missing_item_class(section: &[String]) -> bool {
     section[0].starts_with(cs::RARITY)
 }
 
-/// Read a name plate that carries no class line.
-///
-/// The rarity is first and the name second. Everything else follows the normal
-/// rules.
 fn parse_without_class_line(section: &[String]) -> Result<NamePlate, ParseError> {
     let mut lines = section.iter();
 
@@ -162,8 +101,6 @@ fn parse_without_class_line(section: &[String]) -> Result<NamePlate, ParseError>
         ..ParsedItem::default()
     };
 
-    // Only a gem prints this way, and the reference forces the category for
-    // exactly that reason.
     if item.category.is_none() {
         item.category = Some(ItemCategory::Gem);
     }
@@ -178,10 +115,6 @@ fn parse_without_class_line(section: &[String]) -> Result<NamePlate, ParseError>
     })
 }
 
-/// The rarity words of the eight non English clients the reference supports.
-///
-/// Present only to tell a user their client is not in English. We never parse
-/// these items.
 const FOREIGN_RARITY_LINES: [&str; 8] = [
     "Seltenheit: ",
     "Rareté: ",
@@ -197,23 +130,12 @@ fn looks_like_a_foreign_rarity_line(line: &str) -> bool {
     FOREIGN_RARITY_LINES.iter().any(|p| line.starts_with(p))
 }
 
-/// Remove the game's inline markup from a name.
-///
-/// The game embeds conditional markup in item names. Two forms matter.
-///
-/// - `<<set:X>>` sets state. Always dropped.
-/// - `<if:X>{body}` and friends. The reference always takes the first branch
-///   and drops every `elif` and `else`, so we do the same.
-///
-/// Hand written rather than regex driven. The grammar is two tokens deep and a
-/// scanner is easier to read than two nested patterns.
 pub fn strip_markup(text: &str) -> String {
     let without_set = remove_set_directives(text);
 
     resolve_conditionals(&without_set)
 }
 
-/// Drop every `<<set:...>>` directive.
 fn remove_set_directives(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
@@ -224,7 +146,6 @@ fn remove_set_directives(text: &str) -> String {
         match rest[start..].find(">>") {
             Some(end) => rest = &rest[start + end + 2..],
             None => {
-                // Unterminated. Keep it verbatim rather than eating the name.
                 out.push_str(&rest[start..]);
 
                 return out;
@@ -237,7 +158,6 @@ fn remove_set_directives(text: &str) -> String {
     out
 }
 
-/// Keep the body of an `if` branch and drop `elif` and `else` bodies.
 fn resolve_conditionals(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
@@ -370,8 +290,6 @@ mod tests {
 
     #[test]
     fn a_missing_rarity_line_leaves_the_name_where_it_is() {
-        // Some items print no rarity line at all. The third line must not be
-        // read as a rarity and lost.
         let plate = parse_name_plate(&lines(&["Item Class: Maps", "Chimeral Wetlands"])).unwrap();
 
         assert_eq!(plate.item.rarity, None);
@@ -381,9 +299,6 @@ mod tests {
 
     #[test]
     fn an_unknown_rarity_word_leaves_the_rarity_unset() {
-        // A rarity word this build does not know is reported as no rarity
-        // rather than guessed. The category still comes from the class line,
-        // which the game prints regardless of what the rarity says.
         let plate = parse_name_plate(&lines(&[
             "Item Class: Rings",
             "Rarity: Legendary",
@@ -397,9 +312,6 @@ mod tests {
 
     #[test]
     fn the_class_line_names_the_category() {
-        // The data file only covers the bases the trade API names finely, 810
-        // of 3578. Without this a bow carries no category and the search sends
-        // no category filter at all.
         for (class, expected) in [
             ("Bows", ItemCategory::Bow),
             ("Body Armours", ItemCategory::BodyArmour),
@@ -422,8 +334,6 @@ mod tests {
 
     #[test]
     fn an_unknown_class_leaves_the_category_unset() {
-        // A wrong category sends the search to the wrong part of the site and
-        // returns nothing, which reads as the item being unpriceable.
         let plate = parse_name_plate(&lines(&[
             "Item Class: Brand New Slot",
             "Rarity: Rare",
@@ -437,8 +347,6 @@ mod tests {
 
     #[test]
     fn a_rarity_that_names_a_category_beats_the_class_line() {
-        // "Rarity: Currency" is more specific than the class line for the
-        // things that print it.
         let plate = parse_name_plate(&lines(&[
             "Item Class: Stackable Currency",
             "Rarity: Currency",
@@ -451,9 +359,6 @@ mod tests {
 
     #[test]
     fn a_meta_gem_prints_no_class_line_and_still_parses() {
-        // Found by running our parser against the upstream project's own test
-        // fixtures. A meta gem is the only item that does this, and rejecting
-        // it made every one unparseable.
         let plate = parse_name_plate(&lines(&["Rarity: Gem", "Mirage Archer"])).unwrap();
 
         assert_eq!(plate.name, "Mirage Archer");
@@ -462,7 +367,6 @@ mod tests {
 
     #[test]
     fn a_long_section_starting_with_a_rarity_is_not_a_meta_gem() {
-        // Reading it that way would misalign every line after it.
         assert!(!is_missing_item_class(&lines(&[
             "Rarity: Rare",
             "Doom Fletch",
@@ -506,8 +410,6 @@ mod tests {
 
     #[test]
     fn a_foreign_client_is_named_as_such() {
-        // The fix is to change the game client language, so the error has to
-        // say that rather than blame the item.
         for line in [
             "Seltenheit: Selten",
             "Rareté: Rare",
@@ -558,8 +460,6 @@ mod tests {
 
     #[test]
     fn an_unterminated_set_directive_keeps_the_text() {
-        // Dropping to the end of the string here would erase the item name and
-        // the failure would look like a database miss.
         assert_eq!(strip_markup("Spine <<set:MS Bow"), "Spine <<set:MS Bow");
     }
 
@@ -578,8 +478,6 @@ mod tests {
 
     #[test]
     fn a_tag_with_no_body_brace_is_left_alone() {
-        // Not markup we understand, so it stays. Silently deleting it would
-        // corrupt a name we could otherwise look up.
         assert_eq!(strip_markup("Spine <if:MS> Bow"), "Spine <if:MS> Bow");
     }
 

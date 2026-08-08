@@ -1,18 +1,8 @@
-//! Stages that read a whole line flag.
-//!
-//! Ported from `parseCorrupted`, `parseFoil`, `parseUnidentified`,
-//! `parseInfluence`, `parseMirrored`, `parseSanctified` and `parseSynthesised`
-//! in `renderer/src/parser/Parser.ts`.
-
 use crate::controller::parse::{ParseOutcome, ParserState};
 use crate::types::client_strings as cs;
 use crate::types::item::{Influence, ItemRarity};
 use crate::util::number::leading_int;
 
-/// `Corrupted`, `Twice Corrupted` or `Unmodifiable`.
-///
-/// Unmodifiable implies corrupted. An unmodifiable item cannot take a craft,
-/// which is the only thing corruption changes for pricing.
 pub fn parse_corrupted(section: &[String], state: &mut ParserState) -> ParseOutcome {
     let Some(first) = section.first() else {
         return ParseOutcome::SectionSkipped;
@@ -26,7 +16,6 @@ pub fn parse_corrupted(section: &[String], state: &mut ParserState) -> ParseOutc
         return ParseOutcome::SectionParsed;
     }
 
-    // Not trimmed, matching the reference. Unmodifiable is printed alone.
     if first == cs::UNMODIFIABLE {
         state.item.is_corrupted = true;
         state.item.is_unmodifiable = true;
@@ -37,7 +26,6 @@ pub fn parse_corrupted(section: &[String], state: &mut ParserState) -> ParseOutc
     ParseOutcome::SectionSkipped
 }
 
-/// `Mirrored`.
 pub fn parse_mirrored(section: &[String], state: &mut ParserState) -> ParseOutcome {
     if section.first().is_some_and(|l| l == cs::MIRRORED) {
         state.item.is_mirrored = true;
@@ -48,7 +36,6 @@ pub fn parse_mirrored(section: &[String], state: &mut ParserState) -> ParseOutco
     ParseOutcome::SectionSkipped
 }
 
-/// `Sanctified`.
 pub fn parse_sanctified(section: &[String], state: &mut ParserState) -> ParseOutcome {
     if section.first().is_some_and(|l| l == cs::SANCTIFIED) {
         state.item.is_sanctified = true;
@@ -59,10 +46,6 @@ pub fn parse_sanctified(section: &[String], state: &mut ParserState) -> ParseOut
     ParseOutcome::SectionSkipped
 }
 
-/// `Foil Unique`.
-///
-/// Only uniques can be foil, so the stage bails on everything else rather than
-/// walking every section for a line that cannot be there.
 pub fn parse_foil(section: &[String], state: &mut ParserState) -> ParseOutcome {
     if state.item.rarity != Some(ItemRarity::Unique) {
         return ParseOutcome::ParserSkipped;
@@ -77,7 +60,6 @@ pub fn parse_foil(section: &[String], state: &mut ParserState) -> ParseOutcome {
     ParseOutcome::SectionSkipped
 }
 
-/// `Fractured Item`.
 pub fn parse_fractured_flag(section: &[String], state: &mut ParserState) -> ParseOutcome {
     if section.first().is_some_and(|l| l == cs::FRACTURED_ITEM) {
         state.item.is_fractured = true;
@@ -88,10 +70,6 @@ pub fn parse_fractured_flag(section: &[String], state: &mut ParserState) -> Pars
     ParseOutcome::SectionSkipped
 }
 
-/// `Unidentified`, optionally with a tier.
-///
-/// PoE2 prints `Unidentified (Tier 3)` on waystones. The tier survives
-/// identification, so it is worth capturing.
 pub fn parse_unidentified(section: &[String], state: &mut ParserState) -> ParseOutcome {
     let Some(first) = section.first() else {
         return ParseOutcome::SectionSkipped;
@@ -109,8 +87,6 @@ pub fn parse_unidentified(section: &[String], state: &mut ParserState) -> ParseO
         return ParseOutcome::SectionParsed;
     }
 
-    // The only accepted decoration is a tier in parentheses. Anything else is
-    // a different line that happens to start with the same word.
     let Some(inner) = rest.strip_prefix('(').and_then(|r| r.strip_suffix(')')) else {
         return ParseOutcome::SectionSkipped;
     };
@@ -129,11 +105,6 @@ pub fn parse_unidentified(section: &[String], state: &mut ParserState) -> ParseO
     ParseOutcome::SectionParsed
 }
 
-/// The six PoE1 influence lines.
-///
-/// An item can carry two, so the section is scanned whole. The reference only
-/// looks at sections of two lines or fewer, because a longer section holding
-/// the word `Shaper Item` is a modifier and not an influence.
 pub fn parse_influence(section: &[String], state: &mut ParserState) -> ParseOutcome {
     if section.len() > 2 {
         return ParseOutcome::SectionSkipped;
@@ -164,10 +135,6 @@ pub fn parse_influence(section: &[String], state: &mut ParserState) -> ParseOutc
     ParseOutcome::SectionSkipped
 }
 
-/// `Synthesised Item`, plus the `Synthesised ` name prefix.
-///
-/// The name prefix has to come off or the database lookup misses. A synthesised
-/// Vaal Regalia is still a Vaal Regalia.
 pub fn parse_synthesised(section: &[String], state: &mut ParserState) -> ParseOutcome {
     if !section
         .first()
@@ -354,7 +321,6 @@ mod tests {
 
     #[test]
     fn a_line_merely_starting_with_unidentified_is_skipped() {
-        // Guarding against a modifier such as "Unidentified Items drop..."
         let mut s = state();
 
         assert_eq!(
@@ -418,9 +384,6 @@ mod tests {
 
     #[test]
     fn a_long_section_is_skipped_even_when_it_holds_an_influence_line() {
-        // A modifier section can contain the exact words. Reading it as an
-        // influence would put a filter on the trade query that the item does
-        // not have.
         let mut s = state();
 
         assert_eq!(
