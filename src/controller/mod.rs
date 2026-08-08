@@ -15,6 +15,8 @@ pub mod panel_visible;
 pub mod parse;
 pub mod press_coalesce;
 pub mod price_check;
+pub mod rate_limit;
 pub mod stat_match;
+pub mod trade_api;
 
 pub use price_check::{price_check, PriceCheck, PriceCheckOptions};
