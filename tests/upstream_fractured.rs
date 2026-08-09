@@ -14,10 +14,10 @@
 //! modifier, and the item's own flag is inferred from the modifiers after they
 //! are all read. That inference is what these cases pin.
 
-use poe_trader_core::controller::parse::shared::modifiers::ParsedModifier;
-use poe_trader_core::controller::parse::shared::special::parse_fractured;
-use poe_trader_core::controller::parse::ParserState;
-use poe_trader_core::types::modifier::{ModifierInfo, ModifierType};
+use poe_wayfinder_core::controller::parse::shared::modifiers::ParsedModifier;
+use poe_wayfinder_core::controller::parse::shared::special::parse_fractured;
+use poe_wayfinder_core::controller::parse::ParserState;
+use poe_wayfinder_core::types::modifier::{ModifierInfo, ModifierType};
 
 /// A modifier of a kind, carrying no stats.
 ///

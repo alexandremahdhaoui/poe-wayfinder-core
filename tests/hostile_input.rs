@@ -8,9 +8,9 @@
 //! written scanners: truncation, unbalanced delimiters, huge numbers, and
 //! multi byte characters split at a boundary.
 
-use poe_trader_core::adapter::data_adapter::NO_DATA;
-use poe_trader_core::controller::parse::parse_clipboard;
-use poe_trader_core::types::GameVersion;
+use poe_wayfinder_core::adapter::data_adapter::NO_DATA;
+use poe_wayfinder_core::controller::parse::parse_clipboard;
+use poe_wayfinder_core::types::GameVersion;
 
 /// Parse must return, never panic. The result itself does not matter.
 fn survives(text: &str) {

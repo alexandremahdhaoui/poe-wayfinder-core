@@ -19,7 +19,7 @@
 //! Synthetic fixtures test the code against my understanding. This tests it
 //! against the game.
 
-use poe_trader_core::controller::game_config::{
+use poe_wayfinder_core::controller::game_config::{
     key_name, parse_config_hotkey, parse_ini, show_mods_key, show_mods_key_was_read,
 };
 

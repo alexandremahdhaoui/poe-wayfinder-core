@@ -13,10 +13,10 @@
 //! Every value here is the reference's, not one I chose. A test written
 //! against numbers I picked agrees with whatever I implemented.
 
-use poe_trader_core::controller::aggregate::StatTotal;
-use poe_trader_core::controller::filter::pseudo::{pseudo_totals, PseudoTotal};
-use poe_trader_core::types::modifier::ModifierType;
-use poe_trader_core::types::stat::StatRoll;
+use poe_wayfinder_core::controller::aggregate::StatTotal;
+use poe_wayfinder_core::controller::filter::pseudo::{pseudo_totals, PseudoTotal};
+use poe_wayfinder_core::types::modifier::ModifierType;
+use poe_wayfinder_core::types::stat::StatRoll;
 
 const FIRE_RES: &str = "#% to Fire Resistance";
 const COLD_RES: &str = "#% to Cold Resistance";

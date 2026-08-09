@@ -13,8 +13,8 @@
 //! Influence is most of what a PoE1 base is worth. Getting this wrong is an
 //! order of magnitude on the price, not a rounding error.
 
-use poe_trader_core::controller::filter::influence::{filterable, stat_reference};
-use poe_trader_core::types::item::Influence;
+use poe_wayfinder_core::controller::filter::influence::{filterable, stat_reference};
+use poe_wayfinder_core::types::item::Influence;
 
 const REAL: &str = include_str!("fixtures/poe1_influence_stats.ndjson");
 

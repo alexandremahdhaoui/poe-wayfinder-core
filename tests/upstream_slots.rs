@@ -22,10 +22,10 @@
 //! negative that would take the budget below zero, and one of each pulling in
 //! opposite directions.
 
-use poe_trader_core::controller::filter::slots::{
+use poe_wayfinder_core::controller::filter::slots::{
     max_modifiers_by_slot, PREFIX_ALLOWED, SUFFIX_ALLOWED,
 };
-use poe_trader_core::types::item::ItemRarity;
+use poe_wayfinder_core::types::item::ItemRarity;
 
 /// One row of the reference's table: rarity, the stats on the item, and the
 /// prefix and suffix budgets it expects.

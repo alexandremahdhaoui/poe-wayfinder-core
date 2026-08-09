@@ -20,7 +20,7 @@
 //! not an error: it is a plausible number next to the wrong modifier, which is
 //! exactly the kind of thing a person acts on before noticing.
 
-use poe_trader_core::controller::listing::{mod_block, LineKind};
+use poe_wayfinder_core::controller::listing::{mod_block, LineKind};
 
 const REAL: &str = include_str!("fixtures/upstream_listings.json");
 

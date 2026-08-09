@@ -20,10 +20,10 @@
 //! data builder merges both into one table, so there is no second tier to fall
 //! back to and no behaviour to compare against.
 
-use poe_trader_core::adapter::data_adapter::StatLookup;
-use poe_trader_core::controller::stat_match::placeholder::StatString;
-use poe_trader_core::controller::stat_match::resolve::try_parse_translation;
-use poe_trader_core::types::stat::{Stat, StatBetter, StatHit, StatMatcher, TradeInfo};
+use poe_wayfinder_core::adapter::data_adapter::StatLookup;
+use poe_wayfinder_core::controller::stat_match::placeholder::StatString;
+use poe_wayfinder_core::controller::stat_match::resolve::try_parse_translation;
+use poe_wayfinder_core::types::stat::{Stat, StatBetter, StatHit, StatMatcher, TradeInfo};
 
 /// The reference's `PHYS_DAMAGE_STAT`, including its negating matcher and the
 /// one that bakes in minus a hundred.

@@ -25,8 +25,8 @@
 //! Every one of these is what the trade query filters on. A modifier read with
 //! the wrong type goes to the wrong trade namespace and matches nothing.
 
-use poe_trader_core::controller::mod_desc::{parse_mod_info_line, parse_mod_type};
-use poe_trader_core::types::modifier::{Generation, ModifierType};
+use poe_wayfinder_core::controller::mod_desc::{parse_mod_info_line, parse_mod_type};
+use poe_wayfinder_core::types::modifier::{Generation, ModifierType};
 
 const REAL: &str = include_str!("fixtures/upstream_mod_info.json");
 
@@ -96,7 +96,7 @@ fn generation_named(name: &str) -> Option<Generation> {
 
 /// Run a case the way the reference does: type the section, then read the
 /// heading with that type as the default.
-fn info_for(case: &Case) -> poe_trader_core::types::modifier::ModifierInfo {
+fn info_for(case: &Case) -> poe_wayfinder_core::types::modifier::ModifierInfo {
     let (kind, lines) = parse_mod_type(&case.lines);
 
     parse_mod_info_line(lines.first().map(String::as_str).unwrap_or_default(), kind)

@@ -25,9 +25,9 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use poe_trader_core::controller::filter::item_property::{armour_filters, weapon_filters};
-use poe_trader_core::types::item::{ArmourStats, WeaponStats};
-use poe_trader_core::types::ItemCategory;
+use poe_wayfinder_core::controller::filter::item_property::{armour_filters, weapon_filters};
+use poe_wayfinder_core::types::item::{ArmourStats, WeaponStats};
+use poe_wayfinder_core::types::ItemCategory;
 
 /// Every `tradeId:` in a reference's item-property file.
 fn reference_ids(path: &Path) -> BTreeSet<String> {

@@ -105,7 +105,7 @@ mod tests {
 
     #[test]
     fn a_window_that_is_not_a_game_is_no_game() {
-        for other in ["", "Discord", "poe-trader", "Firefox"] {
+        for other in ["", "Discord", "poe-wayfinder", "Firefox"] {
             assert_eq!(game_for_title(other), None, "{other:?}");
         }
     }

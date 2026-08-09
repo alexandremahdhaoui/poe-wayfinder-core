@@ -14,11 +14,11 @@
 //!
 //! Every input and every expected answer here is the reference's.
 
-use poe_trader_core::controller::parse::shared::content::parse_trials;
-use poe_trader_core::controller::parse::shared::flags::parse_unidentified;
-use poe_trader_core::controller::parse::{ParseOutcome, ParserState};
-use poe_trader_core::types::game::GameVersion;
-use poe_trader_core::types::item::UltimatumHint;
+use poe_wayfinder_core::controller::parse::shared::content::parse_trials;
+use poe_wayfinder_core::controller::parse::shared::flags::parse_unidentified;
+use poe_wayfinder_core::controller::parse::{ParseOutcome, ParserState};
+use poe_wayfinder_core::types::game::GameVersion;
+use poe_wayfinder_core::types::item::UltimatumHint;
 
 fn state() -> ParserState<'static> {
     ParserState {

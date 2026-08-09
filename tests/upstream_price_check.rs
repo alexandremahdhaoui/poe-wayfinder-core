@@ -18,10 +18,10 @@
 //! the harshest input the filter builder can get and it is what a user with a
 //! stale data file has. Nothing here may panic on it.
 
-use poe_trader_core::adapter::data_adapter::NO_DATA;
-use poe_trader_core::controller::bulk::Endpoint;
-use poe_trader_core::controller::price_check::{price_check, PriceCheckOptions};
-use poe_trader_core::types::GameVersion;
+use poe_wayfinder_core::adapter::data_adapter::NO_DATA;
+use poe_wayfinder_core::controller::bulk::Endpoint;
+use poe_wayfinder_core::controller::price_check::{price_check, PriceCheckOptions};
+use poe_wayfinder_core::types::GameVersion;
 
 /// Every fixture, as name and clipboard text.
 fn fixtures() -> Vec<(String, String)> {

@@ -1,4 +1,4 @@
-name: poe-trader-core
+name: poe-wayfinder-core
 
 artifactStorePath: .forge/artifact-store.yaml
 
@@ -13,33 +13,33 @@ build:
     engine: go://generic-builder
     spec:
       command: cargo
-      args: ["fmt", "-p", "poe-trader-core"]
+      args: ["fmt", "-p", "poe-wayfinder-core"]
 
-  - name: poe-trader-core
+  - name: poe-wayfinder-core
     src: ./src
     engine: go://generic-builder
     spec:
       command: cargo
-      args: ["build", "-p", "poe-trader-core", "--release"]
+      args: ["build", "-p", "poe-wayfinder-core", "--release"]
 
 test:
   - name: lint
     runner: go://generic-test-runner
     spec:
       command: cargo
-      args: ["clippy", "-p", "poe-trader-core", "--all-targets", "--", "-D", "warnings"]
+      args: ["clippy", "-p", "poe-wayfinder-core", "--all-targets", "--", "-D", "warnings"]
 
   - name: format-check
     runner: go://generic-test-runner
     spec:
       command: cargo
-      args: ["fmt", "-p", "poe-trader-core", "--", "--check"]
+      args: ["fmt", "-p", "poe-wayfinder-core", "--", "--check"]
 
   - name: unit
     runner: go://generic-test-runner
     spec:
       command: cargo
-      args: ["test", "-p", "poe-trader-core", "--lib"]
+      args: ["test", "-p", "poe-wayfinder-core", "--lib"]
 
   # Our parser against the upstream project's own 26 test items, plus the
   # hostile input suite.
@@ -51,4 +51,4 @@ test:
     runner: go://generic-test-runner
     spec:
       command: cargo
-      args: ["test", "-p", "poe-trader-core", "--tests"]
+      args: ["test", "-p", "poe-wayfinder-core", "--tests"]

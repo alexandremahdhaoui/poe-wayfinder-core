@@ -1,5 +1,5 @@
 [package]
-name = "poe-trader-core"
+name = "poe-wayfinder-core"
 version = "0.1.0"
 edition = "2021"
 description = "Path of Exile item parsing and trade query building. No I/O."

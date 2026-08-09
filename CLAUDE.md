@@ -1,4 +1,4 @@
-# CLAUDE.md — poe-trader-core
+# CLAUDE.md — poe-wayfinder-core
 
 The domain. Text in, item out. Item in, trade query out.
 
@@ -13,7 +13,7 @@ That is why every test here runs without the game and without a socket. The
 reference has no parser tests that run outside Electron. Ours do.
 
 If you need data from outside, declare a trait in `src/adapter/` and let
-`poe-trader-app` implement it. `GameData` is the example.
+`poe-wayfinder-app` implement it. `GameData` is the example.
 
 ## Layout
 
