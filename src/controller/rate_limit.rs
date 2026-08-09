@@ -62,6 +62,24 @@ impl RateLimiter {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LimiterLine {
+    pub in_use: u32,
+    pub max: u32,
+    pub window_secs: u32,
+    pub full: bool,
+}
+
+impl LimiterLine {
+    pub fn is_tight(&self) -> bool {
+        self.max > 0 && (self.full || self.in_use * 4 >= self.max * 3)
+    }
+
+    pub fn caption(&self) -> String {
+        format!("{}/{} per {}s", self.in_use, self.max, self.window_secs)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct LimiterSet {
     limiters: Vec<RateLimiter>,
@@ -84,6 +102,23 @@ impl LimiterSet {
     pub fn limits(&self) -> Vec<Limit> {
         let mut out: Vec<Limit> = self.limiters.iter().map(RateLimiter::limit).collect();
         out.sort_unstable();
+
+        out
+    }
+
+    pub fn limiter_report(&mut self, now: Millis) -> Vec<LimiterLine> {
+        let mut out: Vec<LimiterLine> = self
+            .limiters
+            .iter_mut()
+            .map(|l| LimiterLine {
+                in_use: l.in_use(now),
+                max: l.limit().max,
+                window_secs: l.limit().window_secs,
+                full: l.is_fully_utilized(now),
+            })
+            .collect();
+
+        out.sort_by_key(|line| (line.window_secs, line.max));
 
         out
     }
@@ -775,5 +810,96 @@ mod tests {
         set.limiters.push(limiter(2, 4));
 
         assert_eq!(set.estimate_time(4, 0, false), 4 * SEC);
+    }
+    #[test]
+    fn a_fresh_limiter_reports_nothing_in_use() {
+        let mut set = LimiterSet::conservative();
+        let report = set.limiter_report(0);
+
+        assert_eq!(report.len(), 1);
+        assert_eq!(report[0].in_use, 0);
+        assert_eq!(report[0].max, 1);
+    }
+
+    #[test]
+    fn a_borrowed_slot_shows_up_in_the_report() {
+        let mut set = LimiterSet::conservative();
+        set.borrow(0);
+
+        assert_eq!(set.limiter_report(0)[0].in_use, 1);
+    }
+
+    #[test]
+    fn a_limiter_at_its_ceiling_reads_as_tight() {
+        let line = LimiterLine {
+            in_use: 1,
+            max: 1,
+            window_secs: 5,
+            full: true,
+        };
+
+        assert!(line.is_tight());
+    }
+
+    #[test]
+    fn a_limiter_with_room_left_does_not_read_as_tight() {
+        let line = LimiterLine {
+            in_use: 1,
+            max: 10,
+            window_secs: 5,
+            full: false,
+        };
+
+        assert!(!line.is_tight());
+    }
+
+    #[test]
+    fn a_limiter_with_no_ceiling_never_reads_as_tight() {
+        let line = LimiterLine {
+            in_use: 0,
+            max: 0,
+            window_secs: 5,
+            full: false,
+        };
+
+        assert!(!line.is_tight());
+    }
+
+    #[test]
+    fn a_limiter_line_says_how_much_of_the_window_is_gone() {
+        let line = LimiterLine {
+            in_use: 3,
+            max: 10,
+            window_secs: 60,
+            full: false,
+        };
+
+        assert_eq!(line.caption(), "3/10 per 60s");
+    }
+
+    #[test]
+    fn the_report_is_ordered_by_window_so_it_reads_the_same_every_time() {
+        let mut set = LimiterSet::new();
+        set.adjust(
+            &[
+                ("x-rate-limit-rules".to_string(), "Ip".to_string()),
+                (
+                    "x-rate-limit-ip".to_string(),
+                    "8:10:60,15:60:120".to_string(),
+                ),
+                (
+                    "x-rate-limit-ip-state".to_string(),
+                    "1:10:0,2:60:0".to_string(),
+                ),
+            ],
+            0,
+            0,
+        );
+
+        let report = set.limiter_report(0);
+
+        assert!(report
+            .windows(2)
+            .all(|w| w[0].window_secs <= w[1].window_secs));
     }
 }

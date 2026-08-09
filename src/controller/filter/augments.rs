@@ -4,6 +4,7 @@ use crate::types::query::StatFilter;
 #[derive(Debug, Clone, PartialEq)]
 pub struct AugmentEffect {
     pub reference: String,
+    pub trade_id: String,
     pub value: f64,
     pub categories: Vec<ItemCategory>,
 }
@@ -42,7 +43,7 @@ pub fn preview_filters(
     }
 
     let granted = StatFilter::range(
-        &effect.reference,
+        &effect.trade_id,
         crate::types::query::Range::at_least(effect.value * f64::from(empty_sockets)),
     );
 
@@ -112,6 +113,7 @@ mod tests {
     fn effect(reference: &str, value: f64, categories: Vec<ItemCategory>) -> AugmentEffect {
         AugmentEffect {
             reference: reference.into(),
+            trade_id: format!("rune.{reference}"),
             value,
             categories,
         }
@@ -302,7 +304,7 @@ mod tests {
             .expect("the rune fits the base");
 
         assert_eq!(got.len(), 1);
-        assert_eq!(got[0].id, "#% increased Physical Damage");
+        assert_eq!(got[0].id, "rune.#% increased Physical Damage");
         assert_eq!(got[0].range.min, Some(20.0));
     }
 
@@ -317,7 +319,7 @@ mod tests {
     #[test]
     fn a_rune_raises_a_stat_the_item_already_has() {
         let existing = vec![StatFilter::range(
-            "#% increased Physical Damage",
+            "rune.#% increased Physical Damage",
             Range::at_least(50.0),
         )];
 

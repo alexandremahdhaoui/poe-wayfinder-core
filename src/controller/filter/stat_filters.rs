@@ -49,9 +49,39 @@ pub fn build_stat_group_for(
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
+pub struct FilterSource {
+    pub id: String,
+    pub text: String,
+    pub roll: Option<StatRoll>,
+    pub tier: Option<u32>,
+    pub contributors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct StatFilters {
     pub and: Option<StatGroup>,
     pub counts: Vec<StatGroup>,
+    pub sources: Vec<FilterSource>,
+}
+
+pub fn property_label(id: &str) -> String {
+    match id {
+        "item.armour" => "Armour",
+        "item.evasion_rating" => "Evasion",
+        "item.energy_shield" => "Energy Shield",
+        "item.block" => "Block",
+        "item.total_dps" => "DPS",
+        "item.physical_dps" => "Physical DPS",
+        "item.elemental_dps" => "Elemental DPS",
+        "item.attack_speed" => "Attacks per Second",
+        "item.crit_chance" => "Critical Chance",
+        "item.rune_sockets" => "Rune Sockets",
+        "item.spirit" => "Spirit",
+        "item.reload_time" => "Reload Time",
+        "item.base_percentile" => "Base Percentile",
+        other => other,
+    }
+    .to_string()
 }
 
 pub fn build_stat_filters(
@@ -62,21 +92,24 @@ pub fn build_stat_filters(
 ) -> StatFilters {
     let mut counts = Vec::new();
     let mut filters = Vec::new();
+    let mut sources: Vec<FilterSource> = Vec::new();
 
     if let Some(item) = item {
         for property in armour_filters(item.armour)
             .into_iter()
             .chain(weapon_filters(item.category, item.weapon))
         {
+            let roll = crate::types::stat::StatRoll {
+                value: property.value,
+                min: property.value,
+                max: property.value,
+                ..crate::types::stat::StatRoll::default()
+            };
+
             let mut filter = StatFilter::range(
                 property.id,
                 bound_for(
-                    crate::types::stat::StatRoll {
-                        value: property.value,
-                        min: property.value,
-                        max: property.value,
-                        ..crate::types::stat::StatRoll::default()
-                    },
+                    roll,
                     crate::types::stat::StatBetter::PositiveRoll,
                     false,
                     options,
@@ -87,10 +120,23 @@ pub fn build_stat_filters(
 
             filter.disabled = !options.enable_all && (unique || !property.enabled);
 
+            sources.push(FilterSource {
+                id: property.id.to_string(),
+                text: property_label(property.id),
+                roll: Some(roll),
+                tier: None,
+                contributors: Vec::new(),
+            });
+
             filters.push(filter);
         }
 
-        filters.extend(influence_filters(&item.influences, data, options));
+        filters.extend(influence_filters(
+            &item.influences,
+            data,
+            options,
+            &mut sources,
+        ));
     }
 
     let totals = sum_stats_by_type(modifiers);
@@ -117,10 +163,18 @@ pub fn build_stat_filters(
             options,
         );
 
+        sources.push(FilterSource {
+            id: id.clone(),
+            text: pseudo.reference.to_string(),
+            roll: Some(pseudo.roll),
+            tier: None,
+            contributors: contributors_for(modifiers, pseudo.reference),
+        });
+
         filters.push(filter);
     }
 
-    let mut explicit_matches: Vec<(String, StatFilter)> = Vec::new();
+    let mut explicit_matches: Vec<(String, StatFilter, Option<StatRoll>)> = Vec::new();
 
     for total in totals {
         let Some(matched) = matched_text(modifiers, &total.reference) else {
@@ -132,8 +186,16 @@ pub fn build_stat_filters(
         };
 
         if total.kind == ModifierType::Explicit {
-            explicit_matches.push((matched.clone(), built.filter.clone()));
+            explicit_matches.push((matched.clone(), built.filter.clone(), total.roll));
         }
+
+        sources.push(FilterSource {
+            id: built.filter.id.clone(),
+            text: matched.clone(),
+            roll: total.roll,
+            tier: tier_for(modifiers, &total.reference),
+            contributors: contributors_for(modifiers, &total.reference),
+        });
 
         match built.alternates.is_empty() {
             true => filters.push(built.filter),
@@ -157,12 +219,17 @@ pub fn build_stat_filters(
     }
 
     if let Some(item) = item {
-        filters.extend(missing_fractured_filters(
-            item,
-            modifiers,
-            &explicit_matches,
-            data,
-        ));
+        for fractured in missing_fractured_filters(item, modifiers, &explicit_matches, data) {
+            sources.push(FilterSource {
+                id: fractured.id.clone(),
+                text: fractured.text.clone(),
+                roll: fractured.roll,
+                tier: None,
+                contributors: Vec::new(),
+            });
+
+            filters.push(fractured.filter);
+        }
     }
 
     let filters: Vec<StatFilter> = filters
@@ -176,6 +243,7 @@ pub fn build_stat_filters(
             ..StatGroup::all(Vec::new())
         }),
         counts,
+        sources,
     }
 }
 
@@ -183,12 +251,19 @@ pub fn is_property_id(id: &str) -> bool {
     id.starts_with("item.")
 }
 
+struct FracturedFilter {
+    filter: StatFilter,
+    id: String,
+    text: String,
+    roll: Option<StatRoll>,
+}
+
 fn missing_fractured_filters(
     item: &crate::types::item::ParsedItem,
     modifiers: &[ParsedModifier],
-    explicit_matches: &[(String, StatFilter)],
+    explicit_matches: &[(String, StatFilter, Option<StatRoll>)],
     data: &dyn StatLookup,
-) -> Vec<StatFilter> {
+) -> Vec<FracturedFilter> {
     if !item.is_fractured {
         return Vec::new();
     }
@@ -202,7 +277,7 @@ fn missing_fractured_filters(
 
     explicit_matches
         .iter()
-        .filter_map(|(matched, filter)| {
+        .filter_map(|(matched, filter, roll)| {
             let hit = data.stat_by_matcher(matched)?;
 
             let id = hit
@@ -215,7 +290,12 @@ fn missing_fractured_filters(
             copy.id = id.clone();
             copy.disabled = true;
 
-            Some(copy)
+            Some(FracturedFilter {
+                filter: copy,
+                id: id.clone(),
+                text: matched.clone(),
+                roll: *roll,
+            })
         })
         .collect()
 }
@@ -224,6 +304,7 @@ fn influence_filters(
     influences: &[crate::types::item::Influence],
     data: &dyn StatLookup,
     options: StatFilterOptions,
+    sources: &mut Vec<FilterSource>,
 ) -> Vec<StatFilter> {
     let mut out = Vec::new();
 
@@ -246,10 +327,42 @@ fn influence_filters(
         let mut filter = StatFilter::range(id, Range::default());
         filter.disabled = !options.enable_all;
 
+        sources.push(FilterSource {
+            id: id.clone(),
+            text: reference.to_string(),
+            roll: None,
+            tier: None,
+            contributors: Vec::new(),
+        });
+
         out.push(filter);
     }
 
     out
+}
+
+fn tier_for(modifiers: &[ParsedModifier], reference: &str) -> Option<u32> {
+    modifiers
+        .iter()
+        .find(|m| m.stats.iter().any(|s| s.reference == reference))
+        .and_then(|m| m.info.tier)
+}
+
+fn contributors_for(modifiers: &[ParsedModifier], reference: &str) -> Vec<String> {
+    let carrying: Vec<&ParsedModifier> = modifiers
+        .iter()
+        .filter(|m| m.stats.iter().any(|s| s.reference == reference))
+        .collect();
+
+    if carrying.len() < 2 {
+        return Vec::new();
+    }
+
+    carrying
+        .iter()
+        .filter_map(|m| m.stats.iter().find(|s| s.reference == reference))
+        .map(|s| s.matched.clone())
+        .collect()
 }
 
 fn matched_text(modifiers: &[ParsedModifier], reference: &str) -> Option<String> {

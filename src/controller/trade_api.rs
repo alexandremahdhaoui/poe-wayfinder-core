@@ -33,6 +33,14 @@ impl TradeUrls {
         }
     }
 
+    pub fn set_game(&mut self, game: GameVersion) {
+        self.game = game;
+    }
+
+    pub fn game(&self) -> GameVersion {
+        self.game
+    }
+
     fn root(&self) -> String {
         format!("{}/api/{}", self.base, self.game.trade_path())
     }
@@ -121,6 +129,35 @@ mod tests {
 
     fn urls(game: GameVersion) -> TradeUrls {
         TradeUrls::new("https://www.pathofexile.com", game)
+    }
+
+    #[test]
+    fn switching_game_repoints_every_url_and_keeps_the_base() {
+        let mut u = urls(GameVersion::Poe2);
+
+        assert_eq!(u.game(), GameVersion::Poe2);
+
+        u.set_game(GameVersion::Poe1);
+
+        assert_eq!(u.game(), GameVersion::Poe1);
+        assert_eq!(
+            u.search("Standard"),
+            "https://www.pathofexile.com/api/trade/search/Standard"
+        );
+        assert!(u.exchange("Standard").contains("/api/trade/"));
+        assert!(u.data("stats").contains("/api/trade/"));
+    }
+
+    #[test]
+    fn switching_game_on_a_custom_base_url_keeps_that_base() {
+        let mut u = TradeUrls::new("http://localhost:8080", GameVersion::Poe2);
+
+        u.set_game(GameVersion::Poe1);
+
+        assert_eq!(
+            u.search("Standard"),
+            "http://localhost:8080/api/trade/search/Standard"
+        );
     }
 
     #[test]

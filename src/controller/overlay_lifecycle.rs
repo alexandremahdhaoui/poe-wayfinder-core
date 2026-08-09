@@ -130,6 +130,10 @@ impl Lifecycle {
         self.alt_held_ms = 0;
     }
 
+    pub fn origin(&self) -> Point {
+        self.origin
+    }
+
     pub fn tick(&mut self, input: Input) {
         self.track_alt(input);
 
@@ -536,5 +540,36 @@ mod tests {
     #[test]
     fn the_close_threshold_matches_the_reference() {
         assert!((CLOSE_THRESHOLD - 2.5 * 15.0).abs() < 1.0);
+    }
+    #[test]
+    fn the_origin_is_where_the_check_began() {
+        let mut life = Lifecycle::new(HoldKey::Ctrl);
+        life.begin(Point { x: 700, y: 500 });
+
+        assert_eq!(life.origin(), Point { x: 700, y: 500 });
+    }
+
+    #[test]
+    fn a_pointer_that_never_leaves_the_origin_keeps_the_panel_open() {
+        let mut life = Lifecycle::new(HoldKey::Ctrl);
+        life.begin(Point { x: 700, y: 500 });
+        life.ready(Rect {
+            x: 720,
+            y: 520,
+            width: 400,
+            height: 300,
+        });
+
+        for _ in 0..50 {
+            life.tick(Input {
+                pointer: life.origin(),
+                hold_down: false,
+                alt_alone: false,
+                clicked: false,
+                elapsed_ms: 100,
+            });
+        }
+
+        assert_ne!(life.phase(), Phase::Closed);
     }
 }

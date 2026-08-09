@@ -4,6 +4,10 @@ use crate::types::GameVersion;
 
 pub trait StatLookup {
     fn stat_by_matcher(&self, template: &str) -> Option<StatHit<'_>>;
+
+    fn stat_count(&self) -> usize {
+        0
+    }
 }
 
 pub trait TradeStatLookup {
@@ -44,6 +48,14 @@ impl Namespace {
 
 pub trait ItemLookup {
     fn items_by_name(&self, name: &str, namespace: Namespace, game: GameVersion) -> Vec<BaseInfo>;
+
+    fn augments(&self) -> &[crate::controller::filter::augments::Augment] {
+        &[]
+    }
+
+    fn item_name_count(&self) -> usize {
+        0
+    }
 }
 
 pub trait GameData: StatLookup + ItemLookup + Send + Sync {}

@@ -27,3 +27,11 @@ let sections = text_to_sections(clipboard_text);
 forge build
 forge test-all
 ```
+
+## Licence
+
+Apache License 2.0, see `LICENSE`.
+
+The parser, stat matcher and trade query builder in this crate are ports of
+MIT licensed TypeScript from Awakened PoE Trade and Exiled Exchange 2. Their
+notice, and what was taken and what changed, are in `NOTICE`.

@@ -33,6 +33,7 @@ pub struct PriceCheck {
     pub query: TradeQuery,
     pub endpoint: Endpoint,
     pub trade_tag: Option<String>,
+    pub sources: Vec<crate::controller::filter::stat_filters::FilterSource>,
 }
 
 impl PriceCheck {
@@ -70,15 +71,27 @@ pub fn price_check(
             && !item.is_modifiable(),
     };
 
+    stats.roll_tolerance = crate::controller::filter::rules::tolerance_for(stats.facts);
+
     let preset = preset_for(&item);
 
     if let Some(range) = gem_level_filter(&item, preset) {
         query.filters.misc_filters.gem_level = range;
     }
 
+    {
+        use crate::controller::filter::unique::{unique_level_filter, unique_search};
+
+        if let Some(range) = unique_level_filter(&item, unique_search(&item)) {
+            query.filters.type_filters.ilvl = range;
+        }
+    }
+
     if let Some(range) = trials_filter(&item, preset) {
         query.filters.map_filters.map_revives = range;
     }
+
+    let mut sources = Vec::new();
 
     if uses_modifiers(preset) {
         let properties = uses_item_properties(preset).then_some(&item);
@@ -87,6 +100,7 @@ pub fn price_check(
 
         query.stats.extend(built.and);
         query.stats.extend(built.counts);
+        sources = built.sources;
     }
 
     apply_heist_rules(&item, data, &mut query);
@@ -120,6 +134,7 @@ pub fn price_check(
         item,
         query,
         endpoint,
+        sources,
     })
 }
 
