@@ -78,6 +78,7 @@ pub struct Lifecycle {
     hold: HoldKey,
     alt_held_ms: u64,
     alt_hidden: bool,
+    locked: bool,
 }
 
 impl Lifecycle {
@@ -94,6 +95,7 @@ impl Lifecycle {
             hold,
             alt_held_ms: 0,
             alt_hidden: false,
+            locked: false,
         }
     }
 
@@ -114,13 +116,48 @@ impl Lifecycle {
         self.origin = pointer;
         self.alt_held_ms = 0;
         self.alt_hidden = false;
+        self.locked = false;
+    }
+
+    pub fn begin_locked(&mut self, pointer: Point) {
+        self.begin(pointer);
+        self.locked = true;
+    }
+
+    pub fn is_locked(self) -> bool {
+        self.locked
+    }
+
+    pub fn toggle_locked(&mut self) -> bool {
+        if !self.phase.is_on_screen() {
+            return false;
+        }
+
+        match self.locked {
+            true => {
+                self.dismiss();
+
+                false
+            }
+            false => {
+                self.locked = true;
+                self.phase = Phase::Interactive;
+                self.alt_hidden = false;
+                self.alt_held_ms = 0;
+
+                true
+            }
+        }
     }
 
     pub fn ready(&mut self, panel: Rect) {
         self.panel = panel;
 
         if self.phase == Phase::Loading {
-            self.phase = Phase::Watching;
+            self.phase = match self.locked {
+                true => Phase::Interactive,
+                false => Phase::Watching,
+            };
         }
     }
 
@@ -128,6 +165,7 @@ impl Lifecycle {
         self.phase = Phase::Closed;
         self.alt_hidden = false;
         self.alt_held_ms = 0;
+        self.locked = false;
     }
 
     pub fn origin(&self) -> Point {
@@ -146,6 +184,10 @@ impl Lifecycle {
         }
 
         if self.phase == Phase::Loading {
+            if self.locked {
+                return;
+            }
+
             if self.drifted(input) {
                 self.phase = Phase::Closed;
             }
@@ -164,6 +206,10 @@ impl Lifecycle {
         if input.clicked {
             self.phase = Phase::Closed;
 
+            return;
+        }
+
+        if self.locked {
             return;
         }
 
@@ -235,6 +281,133 @@ mod tests {
             clicked: false,
             elapsed_ms: 16,
         }
+    }
+
+    fn locked() -> Lifecycle {
+        let mut life = Lifecycle::new(HoldKey::Ctrl);
+        life.begin_locked(ORIGIN);
+        life.ready(PANEL);
+
+        life
+    }
+
+    const FAR: Point = Point { x: 40, y: 40 };
+
+    #[test]
+    fn the_overlay_key_grabs_a_panel_that_is_only_being_watched() {
+        let mut life = watching();
+
+        assert!(life.toggle_locked(), "the panel was grabbed");
+        assert!(life.is_locked());
+        assert!(life.takes_input(), "grabbing it is what makes it clickable");
+    }
+
+    #[test]
+    fn the_overlay_key_releases_a_panel_it_already_grabbed() {
+        let mut life = locked();
+
+        assert!(!life.toggle_locked(), "the panel was released");
+        assert_eq!(life.phase(), Phase::Closed);
+    }
+
+    #[test]
+    fn the_overlay_key_does_nothing_when_no_panel_is_up() {
+        let mut life = Lifecycle::new(HoldKey::Ctrl);
+
+        assert!(!life.toggle_locked());
+        assert_eq!(life.phase(), Phase::Closed);
+    }
+
+    #[test]
+    fn grabbing_a_panel_that_alt_had_hidden_brings_it_back() {
+        let mut life = watching();
+
+        life.tick(Input {
+            alt_alone: true,
+            elapsed_ms: ALT_HIDE_MS_WATCHING + 10,
+            ..quiet(ORIGIN)
+        });
+
+        assert!(!life.is_drawn(), "alt hides it");
+
+        life.toggle_locked();
+
+        assert!(life.is_drawn(), "the overlay key brings it back to be used");
+    }
+
+    #[test]
+    fn a_locked_panel_is_interactive_the_moment_it_is_ready() {
+        let life = locked();
+
+        assert!(life.is_locked());
+        assert_eq!(life.phase(), Phase::Interactive);
+        assert!(life.takes_input(), "a locked panel is there to be used");
+    }
+
+    #[test]
+    fn a_locked_panel_ignores_the_pointer_wandering_off() {
+        let mut life = locked();
+
+        life.tick(quiet(FAR));
+        life.tick(quiet(FAR));
+
+        assert_eq!(life.phase(), Phase::Interactive, "locked means it stays");
+    }
+
+    #[test]
+    fn an_unlocked_panel_still_closes_when_the_pointer_wanders_off() {
+        let mut life = watching();
+
+        life.tick(quiet(FAR));
+
+        assert_eq!(life.phase(), Phase::Closed);
+    }
+
+    #[test]
+    fn a_locked_panel_still_closes_on_a_click_outside_it() {
+        let mut life = locked();
+
+        life.tick(Input {
+            clicked: true,
+            ..quiet(FAR)
+        });
+
+        assert_eq!(life.phase(), Phase::Closed);
+    }
+
+    #[test]
+    fn dismissing_a_locked_panel_clears_the_lock() {
+        let mut life = locked();
+
+        life.dismiss();
+
+        assert!(!life.is_locked());
+        assert_eq!(life.phase(), Phase::Closed);
+    }
+
+    #[test]
+    fn a_locked_panel_survives_the_drift_that_would_close_it_while_loading() {
+        let mut life = Lifecycle::new(HoldKey::Ctrl);
+
+        life.begin_locked(ORIGIN);
+        life.tick(quiet(FAR));
+
+        assert_ne!(
+            life.phase(),
+            Phase::Closed,
+            "moving to the panel must not close it before it is even drawn"
+        );
+    }
+
+    #[test]
+    fn the_next_plain_check_is_not_still_locked() {
+        let mut life = locked();
+
+        life.begin(ORIGIN);
+        life.ready(PANEL);
+
+        assert!(!life.is_locked());
+        assert_eq!(life.phase(), Phase::Watching);
     }
 
     fn watching() -> Lifecycle {

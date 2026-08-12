@@ -56,6 +56,10 @@ pub trait ItemLookup {
     fn item_name_count(&self) -> usize {
         0
     }
+
+    fn every_name(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 pub trait GameData: StatLookup + ItemLookup + Send + Sync {}
