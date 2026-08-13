@@ -179,6 +179,40 @@ pub fn modifier_text(text: &str, roll: Option<f64>, decimals: bool) -> String {
     text.replacen('#', &rendered, 1)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GaugeEdit {
+    pub sets_min: bool,
+    pub value: f64,
+}
+
+pub fn gauge_edit(row: &Row, ratio: f64) -> Option<GaugeEdit> {
+    let (low, high) = row.bounds?;
+
+    if !(high > low) {
+        return None;
+    }
+
+    let raw = low + ratio.clamp(0.0, 1.0) * (high - low);
+
+    let value = match row.decimals {
+        true => (raw * 100.0).round() / 100.0,
+        false => raw.round(),
+    };
+
+    let min = row.min.unwrap_or(low);
+    let max = row.max.unwrap_or(high);
+
+    let sets_min = (value - min).abs() <= (value - max).abs();
+
+    Some(GaugeEdit {
+        sets_min,
+        value: match sets_min {
+            true => value.min(max),
+            false => value.max(min),
+        },
+    })
+}
+
 impl Row {
     pub fn percent_of_bounds(&self) -> Option<f64> {
         let (low, high) = self.bounds?;
@@ -812,6 +846,85 @@ mod tests {
         let view = build(&check(ring(), query, Vec::new()));
 
         assert_eq!(view.stats[0].label, "explicit.stat_unknown");
+    }
+
+    fn gauge_row(min: Option<f64>, max: Option<f64>, decimals: bool) -> Row {
+        Row {
+            key: RowKey::Stat {
+                group: 0,
+                index: 0,
+            },
+            label: "increased Spirit".into(),
+            enabled: true,
+            min,
+            max,
+            roll: Some(11.0),
+            bounds: Some((10.0, 20.0)),
+            decimals,
+            tier: None,
+            contributors: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn clicking_the_gauge_reads_a_value_off_the_tier_range() {
+        let edit = gauge_edit(&gauge_row(None, None, false), 0.5).unwrap();
+
+        assert_eq!(edit.value, 15.0);
+    }
+
+    #[test]
+    fn clicking_near_the_low_end_moves_the_minimum() {
+        let edit = gauge_edit(&gauge_row(Some(12.0), Some(18.0), false), 0.1).unwrap();
+
+        assert!(edit.sets_min);
+        assert_eq!(edit.value, 11.0);
+    }
+
+    #[test]
+    fn clicking_near_the_high_end_moves_the_maximum() {
+        let edit = gauge_edit(&gauge_row(Some(12.0), Some(18.0), false), 0.9).unwrap();
+
+        assert!(!edit.sets_min);
+        assert_eq!(edit.value, 19.0);
+    }
+
+    #[test]
+    fn a_handle_never_crosses_the_other_one() {
+        let past_max = gauge_edit(&gauge_row(Some(11.0), Some(12.0), false), 1.0).unwrap();
+
+        assert!(!past_max.sets_min);
+        assert!(past_max.value >= 11.0);
+
+        let past_min = gauge_edit(&gauge_row(Some(18.0), Some(19.0), false), 0.0).unwrap();
+
+        assert!(past_min.sets_min);
+        assert!(past_min.value <= 19.0);
+    }
+
+    #[test]
+    fn a_decimal_row_keeps_two_places_rather_than_snapping_to_whole_numbers() {
+        let edit = gauge_edit(&gauge_row(None, None, true), 0.333).unwrap();
+
+        assert_eq!(edit.value, 13.33);
+    }
+
+    #[test]
+    fn a_click_outside_the_bar_is_clamped_rather_than_read_as_a_wild_value() {
+        assert_eq!(gauge_edit(&gauge_row(None, None, false), -5.0).unwrap().value, 10.0);
+        assert_eq!(gauge_edit(&gauge_row(None, None, false), 5.0).unwrap().value, 20.0);
+    }
+
+    #[test]
+    fn a_row_with_no_tier_range_has_no_gauge_to_click() {
+        let mut row = gauge_row(None, None, false);
+        row.bounds = None;
+
+        assert_eq!(gauge_edit(&row, 0.5), None);
+
+        row.bounds = Some((10.0, 10.0));
+
+        assert_eq!(gauge_edit(&row, 0.5), None);
     }
 
     #[test]

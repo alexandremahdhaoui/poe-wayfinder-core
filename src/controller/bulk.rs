@@ -1,4 +1,18 @@
 use crate::types::category::ItemCategory;
+use crate::types::GameVersion;
+
+pub fn currencies_to_price_in(game: GameVersion, want: &str) -> Vec<String> {
+    let standard: &[&str] = match game {
+        GameVersion::Poe1 => &["chaos", "divine"],
+        GameVersion::Poe2 => &["exalted", "divine"],
+    };
+
+    standard
+        .iter()
+        .filter(|currency| **currency != want)
+        .map(|currency| (*currency).to_string())
+        .collect()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Endpoint {
@@ -124,6 +138,33 @@ mod tests {
             has_stack_size_filter: false,
             any_stat_enabled: true,
         }
+    }
+
+    #[test]
+    fn an_exchange_asks_for_a_price_in_real_currency_rather_than_anything_at_all() {
+        assert_eq!(
+            currencies_to_price_in(GameVersion::Poe2, "augmentation"),
+            vec!["exalted".to_string(), "divine".to_string()],
+            "an empty list lets the exchange answer in tier 3 waystones"
+        );
+
+        assert_eq!(
+            currencies_to_price_in(GameVersion::Poe1, "augmentation"),
+            vec!["chaos".to_string(), "divine".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_currency_is_never_priced_in_itself() {
+        assert_eq!(
+            currencies_to_price_in(GameVersion::Poe2, "exalted"),
+            vec!["divine".to_string()]
+        );
+
+        assert_eq!(
+            currencies_to_price_in(GameVersion::Poe1, "chaos"),
+            vec!["divine".to_string()]
+        );
     }
 
     #[test]

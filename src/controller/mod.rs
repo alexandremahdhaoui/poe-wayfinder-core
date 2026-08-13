@@ -14,6 +14,7 @@ pub mod hotkey_match;
 pub mod item_editor;
 pub mod item_links;
 pub mod item_search;
+pub mod league_list;
 pub mod leveling;
 pub mod leveling_xp;
 pub mod library;
