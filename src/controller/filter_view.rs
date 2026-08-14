@@ -171,6 +171,10 @@ pub fn modifier_text(text: &str, roll: Option<f64>, decimals: bool) -> String {
         return text.to_string();
     }
 
+    if !roll.is_finite() {
+        return text.to_string();
+    }
+
     let rendered = match decimals {
         true => format!("{roll:.2}"),
         false => format!("{}", roll.round() as i64),
@@ -188,7 +192,7 @@ pub struct GaugeEdit {
 pub fn gauge_edit(row: &Row, ratio: f64) -> Option<GaugeEdit> {
     let (low, high) = row.bounds?;
 
-    if !(high > low) {
+    if high <= low {
         return None;
     }
 
@@ -202,7 +206,13 @@ pub fn gauge_edit(row: &Row, ratio: f64) -> Option<GaugeEdit> {
     let min = row.min.unwrap_or(low);
     let max = row.max.unwrap_or(high);
 
-    let sets_min = (value - min).abs() <= (value - max).abs();
+    let sets_min = if value < min {
+        true
+    } else if value > max {
+        false
+    } else {
+        (value - min).abs() <= (value - max).abs()
+    };
 
     Some(GaugeEdit {
         sets_min,
@@ -850,10 +860,7 @@ mod tests {
 
     fn gauge_row(min: Option<f64>, max: Option<f64>, decimals: bool) -> Row {
         Row {
-            key: RowKey::Stat {
-                group: 0,
-                index: 0,
-            },
+            key: RowKey::Stat { group: 0, index: 0 },
             label: "increased Spirit".into(),
             enabled: true,
             min,
@@ -864,6 +871,45 @@ mod tests {
             tier: None,
             contributors: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_modifier_with_an_unreadable_roll_keeps_its_placeholder_rather_than_printing_i64_max() {
+        for roll in [f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+            assert_eq!(
+                modifier_text("+# to maximum Life", Some(roll), false),
+                "+# to maximum Life",
+                "{roll} rendered as a number"
+            );
+        }
+    }
+
+    #[test]
+    fn the_two_handles_stay_usable_when_they_sit_on_the_same_value() {
+        let mut row = gauge_row(Some(15.0), Some(15.0), false);
+        row.bounds = Some((10.0, 20.0));
+
+        let high = gauge_edit(&row, 1.0).unwrap();
+
+        assert!(!high.sets_min, "the max handle can never be moved again");
+        assert_eq!(high.value, 20.0);
+
+        let low = gauge_edit(&row, 0.0).unwrap();
+
+        assert!(low.sets_min);
+        assert_eq!(low.value, 10.0);
+    }
+
+    #[test]
+    fn a_min_typed_above_the_max_is_pulled_back_inside_the_tier() {
+        let row = gauge_row(Some(50.0), Some(10.0), false);
+
+        let edit = gauge_edit(&row, 0.5).unwrap();
+
+        assert!(
+            edit.value >= 10.0 && edit.value <= 20.0,
+            "{edit:?} left the tier"
+        );
     }
 
     #[test]
@@ -911,8 +957,18 @@ mod tests {
 
     #[test]
     fn a_click_outside_the_bar_is_clamped_rather_than_read_as_a_wild_value() {
-        assert_eq!(gauge_edit(&gauge_row(None, None, false), -5.0).unwrap().value, 10.0);
-        assert_eq!(gauge_edit(&gauge_row(None, None, false), 5.0).unwrap().value, 20.0);
+        assert_eq!(
+            gauge_edit(&gauge_row(None, None, false), -5.0)
+                .unwrap()
+                .value,
+            10.0
+        );
+        assert_eq!(
+            gauge_edit(&gauge_row(None, None, false), 5.0)
+                .unwrap()
+                .value,
+            20.0
+        );
     }
 
     #[test]
