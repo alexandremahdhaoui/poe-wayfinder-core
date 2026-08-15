@@ -2,6 +2,72 @@ use crate::controller::background::is_private_league;
 
 pub const PERMANENT: [&str; 4] = ["Standard", "Hardcore", "SSF Standard", "SSF Hardcore"];
 
+pub const FALLBACK: &str = "Standard";
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LeagueFrom {
+    Configured,
+    Chosen,
+    TradeApi,
+    LastRun,
+    GameLog,
+    #[default]
+    Fallback,
+}
+
+impl LeagueFrom {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LeagueFrom::Configured => "configured",
+            LeagueFrom::Chosen => "chosen by hand",
+            LeagueFrom::TradeApi => "trade api",
+            LeagueFrom::LastRun => "last run",
+            LeagueFrom::GameLog => "read from the game",
+            LeagueFrom::Fallback => "fallback",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct League {
+    pub name: String,
+    pub from: LeagueFrom,
+}
+
+pub struct Sources<'a> {
+    pub configured: &'a str,
+    pub chosen: Option<String>,
+    pub fetched: Option<String>,
+    pub remembered: Option<String>,
+}
+
+pub fn resolve(sources: Sources) -> League {
+    let ordered = [
+        (LeagueFrom::Configured, Some(sources.configured.to_string())),
+        (LeagueFrom::Chosen, sources.chosen),
+        (LeagueFrom::TradeApi, sources.fetched),
+        (LeagueFrom::LastRun, sources.remembered),
+    ];
+
+    for (from, candidate) in ordered {
+        let Some(name) = candidate else {
+            continue;
+        };
+
+        if !name.trim().is_empty() {
+            return League {
+                name: name.trim().to_string(),
+                from,
+            };
+        }
+    }
+
+    League {
+        name: FALLBACK.to_string(),
+        from: LeagueFrom::Fallback,
+    }
+}
+
 pub fn parse(body: &str) -> Vec<String> {
     let Ok(root) = serde_json::from_str::<serde_json::Value>(body) else {
         return Vec::new();
@@ -151,5 +217,96 @@ mod tests {
             parse(r#"{"result":[{"realm":"poe2"},{"id":"  "},{"id":"Runes of Aldur"}]}"#),
             leagues(&["Runes of Aldur"])
         );
+    }
+
+    fn sources() -> Sources<'static> {
+        Sources {
+            configured: "",
+            chosen: None,
+            fetched: None,
+            remembered: None,
+        }
+    }
+
+    #[test]
+    fn a_named_league_wins_over_anything_detected() {
+        let got = resolve(Sources {
+            configured: "Standard",
+            fetched: Some("HC".into()),
+            remembered: Some("Runes of Aldur".into()),
+            ..sources()
+        });
+
+        assert_eq!(got.name, "Standard");
+        assert_eq!(got.from, LeagueFrom::Configured);
+    }
+
+    #[test]
+    fn a_league_the_user_pinned_by_hand_survives_the_restart_that_would_re_resolve_it() {
+        let got = resolve(Sources {
+            chosen: Some("Standard".into()),
+            fetched: Some("Runes of Aldur".into()),
+            remembered: Some("Runes of Aldur".into()),
+            ..sources()
+        });
+
+        assert_eq!(got.name, "Standard");
+        assert_eq!(got.from, LeagueFrom::Chosen);
+    }
+
+    #[test]
+    fn an_unset_league_takes_the_one_the_trade_site_reports() {
+        let got = resolve(Sources {
+            fetched: Some("Runes of Aldur".into()),
+            remembered: Some("Old League".into()),
+            ..sources()
+        });
+
+        assert_eq!(got.name, "Runes of Aldur");
+        assert_eq!(got.from, LeagueFrom::TradeApi);
+    }
+
+    #[test]
+    fn a_league_lookup_that_failed_falls_back_to_the_last_run() {
+        let got = resolve(Sources {
+            remembered: Some("Runes of Aldur".into()),
+            ..sources()
+        });
+
+        assert_eq!(got.name, "Runes of Aldur");
+        assert_eq!(got.from, LeagueFrom::LastRun);
+    }
+
+    #[test]
+    fn knowing_nothing_at_all_searches_standard_rather_than_no_league() {
+        for spelling in ["", "   "] {
+            let got = resolve(Sources {
+                configured: spelling,
+                ..sources()
+            });
+
+            assert_eq!(got.name, FALLBACK);
+            assert_eq!(got.from, LeagueFrom::Fallback);
+        }
+    }
+
+    #[test]
+    fn every_source_a_league_can_come_from_has_a_name_a_log_reader_can_read() {
+        let every = [
+            LeagueFrom::Configured,
+            LeagueFrom::Chosen,
+            LeagueFrom::TradeApi,
+            LeagueFrom::LastRun,
+            LeagueFrom::GameLog,
+            LeagueFrom::Fallback,
+        ];
+
+        for (i, from) in every.iter().enumerate() {
+            assert!(!from.as_str().is_empty(), "{from:?}");
+
+            for other in &every[i + 1..] {
+                assert_ne!(from.as_str(), other.as_str(), "{from:?} reads as {other:?}");
+            }
+        }
     }
 }

@@ -34,6 +34,7 @@ pub mod rate_limit;
 pub mod settings_view;
 pub mod stat_match;
 pub mod stopwatch;
+pub mod switching;
 pub mod trade_api;
 
 pub use price_check::{price_check, PriceCheck, PriceCheckOptions};
