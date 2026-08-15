@@ -168,6 +168,20 @@ mod tests {
     }
 
     #[test]
+    fn pricing_divine_in_divine_leaves_the_other_currency_alone_in_both_games() {
+        assert_eq!(
+            currencies_to_price_in(GameVersion::Poe2, "divine"),
+            vec!["exalted".to_string()],
+            "divine is the only want that changes which of the two survives"
+        );
+
+        assert_eq!(
+            currencies_to_price_in(GameVersion::Poe1, "divine"),
+            vec!["chaos".to_string()]
+        );
+    }
+
+    #[test]
     fn a_currency_goes_to_the_exchange() {
         assert_eq!(endpoint_for(&currency()), Endpoint::Exchange);
     }

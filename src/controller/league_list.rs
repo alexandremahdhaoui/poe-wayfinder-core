@@ -29,11 +29,23 @@ pub fn current(leagues: &[String]) -> Option<String> {
 }
 
 fn is_temporary(league: &str) -> bool {
-    !PERMANENT.contains(&league) && !is_private_league(league) && !is_hardcore(league)
+    !PERMANENT.contains(&league)
+        && !is_private_league(league)
+        && !is_hardcore(league)
+        && !is_ruthless(league)
+        && !is_solo_self_found(league)
 }
 
 fn is_hardcore(league: &str) -> bool {
     league.starts_with("HC ") || league.starts_with("Hardcore ")
+}
+
+fn is_ruthless(league: &str) -> bool {
+    league.contains("Ruthless")
+}
+
+fn is_solo_self_found(league: &str) -> bool {
+    league.starts_with("SSF ")
 }
 
 #[cfg(test)]
@@ -85,6 +97,30 @@ mod tests {
     fn a_private_league_is_never_chosen_on_its_own() {
         assert_eq!(
             current(&leagues(&["Runes of Aldur (PL12345)", "Runes of Aldur"])),
+            Some("Runes of Aldur".to_string())
+        );
+    }
+
+    #[test]
+    fn a_ruthless_league_is_never_chosen_because_its_prices_are_a_different_economy() {
+        assert_eq!(
+            current(&leagues(&["Ruthless", "Runes of Aldur"])),
+            Some("Runes of Aldur".to_string())
+        );
+        assert_eq!(
+            current(&leagues(&[
+                "Runes of Aldur Ruthless",
+                "HC Ruthless",
+                "Runes of Aldur"
+            ])),
+            Some("Runes of Aldur".to_string())
+        );
+    }
+
+    #[test]
+    fn a_solo_self_found_temporary_league_is_never_chosen_over_the_trade_league() {
+        assert_eq!(
+            current(&leagues(&["SSF Runes of Aldur", "Runes of Aldur"])),
             Some("Runes of Aldur".to_string())
         );
     }

@@ -937,15 +937,29 @@ mod tests {
 
     #[test]
     fn a_handle_never_crosses_the_other_one() {
-        let past_max = gauge_edit(&gauge_row(Some(11.0), Some(12.0), false), 1.0).unwrap();
+        for (min, max, ratio) in [
+            (11.0, 12.0, 1.0),
+            (18.0, 19.0, 0.0),
+            (19.0, 12.0, 0.0),
+            (19.0, 12.0, 0.5),
+            (19.0, 12.0, 1.0),
+            (15.0, 15.0, 0.9),
+        ] {
+            let edit = gauge_edit(&gauge_row(Some(min), Some(max), false), ratio).unwrap();
 
-        assert!(!past_max.sets_min);
-        assert!(past_max.value >= 11.0);
-
-        let past_min = gauge_edit(&gauge_row(Some(18.0), Some(19.0), false), 0.0).unwrap();
-
-        assert!(past_min.sets_min);
-        assert!(past_min.value <= 19.0);
+            match edit.sets_min {
+                true => assert!(
+                    edit.value <= max,
+                    "min {} passed max {max} for row {min}..{max} at {ratio}",
+                    edit.value
+                ),
+                false => assert!(
+                    edit.value >= min,
+                    "max {} passed min {min} for row {min}..{max} at {ratio}",
+                    edit.value
+                ),
+            }
+        }
     }
 
     #[test]

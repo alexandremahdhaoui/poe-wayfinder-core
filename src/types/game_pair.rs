@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 use crate::types::GameVersion;
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GamePair<T> {
     poe1: T,
     poe2: T,
@@ -36,6 +38,20 @@ mod tests {
 
         assert_eq!(*pair.get(GameVersion::Poe1), "one");
         assert_eq!(*pair.get(GameVersion::Poe2), "two");
+    }
+
+    #[test]
+    fn a_pair_survives_a_json_round_trip_so_it_can_be_stored_per_game() {
+        let pair = GamePair::new("Standard".to_string(), "Rise of the Abyssal".to_string());
+
+        let text = serde_json::to_string(&pair).unwrap();
+
+        assert_eq!(
+            serde_json::from_str::<GamePair<String>>(&text).unwrap(),
+            pair
+        );
+        assert!(text.contains("poe1"), "{text}");
+        assert!(text.contains("poe2"), "{text}");
     }
 
     #[test]

@@ -35,16 +35,22 @@ pub fn round_for_reading(value: f64) -> String {
         return "?".to_string();
     }
 
-    if value >= 100.0 {
+    let magnitude = value.abs();
+
+    if magnitude == 0.0 {
+        return "0".to_string();
+    }
+
+    if magnitude >= 100.0 {
         return format!("{}", value.round() as i64);
     }
 
-    let decimals = if value >= 10.0 {
+    let decimals = if magnitude >= 10.0 {
         1
-    } else if value >= 1.0 {
+    } else if magnitude >= 1.0 {
         2
     } else {
-        let leading_zeroes = (-value.log10().floor()) as usize;
+        let leading_zeroes = (-magnitude.log10().floor()) as usize;
 
         (leading_zeroes + 2).min(10)
     };
@@ -139,6 +145,27 @@ mod tests {
     #[test]
     fn a_negative_rate_is_refused() {
         assert_eq!(price(-5.0, "divine").amount, "?");
+    }
+
+    #[test]
+    fn rounding_zero_prints_zero_rather_than_overflowing_the_decimal_count() {
+        assert_eq!(round_for_reading(0.0), "0");
+        assert_eq!(round_for_reading(-0.0), "0");
+    }
+
+    #[test]
+    fn rounding_a_negative_value_keeps_its_sign_rather_than_overflowing() {
+        assert_eq!(round_for_reading(-5.0), "-5");
+        assert_eq!(round_for_reading(-32.47), "-32.5");
+        assert_eq!(round_for_reading(-1387.42), "-1387");
+        assert!(round_for_reading(-0.0007).starts_with("-0.0007"));
+    }
+
+    #[test]
+    fn rounding_a_non_finite_value_says_so_rather_than_printing_inf() {
+        assert_eq!(round_for_reading(f64::INFINITY), "?");
+        assert_eq!(round_for_reading(f64::NEG_INFINITY), "?");
+        assert_eq!(round_for_reading(f64::NAN), "?");
     }
 
     #[test]
