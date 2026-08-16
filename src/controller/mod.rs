@@ -28,6 +28,7 @@ pub mod notepad;
 pub mod overlay;
 pub mod overlay_lifecycle;
 pub mod pad_focus;
+pub mod pad_script;
 pub mod panel_visible;
 pub mod parse;
 pub mod press_coalesce;
