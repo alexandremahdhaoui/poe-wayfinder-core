@@ -57,6 +57,30 @@ fn button_offset(product: u16, report: &[u8]) -> Option<usize> {
     }
 }
 
+fn stick_offset(product: u16, report: &[u8]) -> Option<usize> {
+    let buttons = button_offset(product, report)?;
+
+    let sticks = match is_dualsense(product) && report.len() >= 64 {
+        true => buttons.checked_sub(7)?,
+        false => buttons.checked_sub(4)?,
+    };
+
+    match report.len() >= sticks + 4 {
+        true => Some(sticks),
+        false => None,
+    }
+}
+
+pub fn parse_left_stick(product: u16, report: &[u8]) -> Option<(f32, f32)> {
+    let at = stick_offset(product, report)?;
+
+    Some((centred(report[at]), centred(report[at + 1])))
+}
+
+fn centred(byte: u8) -> f32 {
+    (f32::from(byte) - 128.0) / 127.0
+}
+
 pub fn parse_report(product: u16, report: &[u8]) -> Option<u16> {
     let offset = button_offset(product, report)?;
 
@@ -372,6 +396,49 @@ mod tests {
         assert_eq!(bit_for_button(13), 0, "PS button is not offered as a chord");
         assert_eq!(bit_for_button(14), 0, "touchpad is not offered as a chord");
         assert_eq!(bit_for_button(99), 0);
+    }
+
+    fn with_left_stick(mut report: Vec<u8>, x: u8, y: u8, at: usize) -> Vec<u8> {
+        report[at] = x;
+        report[at + 1] = y;
+
+        report
+    }
+
+    #[test]
+    fn a_stick_at_rest_reads_as_the_middle() {
+        let report = with_left_stick(dualsense_usb(NEUTRAL, 0, 0), 0x80, 0x7f, 1);
+        let (x, y) = parse_left_stick(DUALSENSE, &report).expect("sticks");
+
+        assert!(x.abs() < 0.6 && y.abs() < 0.6, "{x} {y}");
+    }
+
+    #[test]
+    fn the_left_stick_is_read_at_its_own_offset_on_every_transport() {
+        let cases = [
+            (DUALSENSE, dualsense_usb(NEUTRAL, 0, 0), 1),
+            (DUALSENSE, dualsense_bluetooth(NEUTRAL, 0, 0), 1),
+            (DUALSENSE, dualsense_bluetooth_full(NEUTRAL, 0, 0), 2),
+            (DUALSHOCK4_V2, dualshock_usb(NEUTRAL, 0, 0), 1),
+            (DUALSHOCK4_V2, dualshock_bluetooth_full(NEUTRAL, 0, 0), 3),
+        ];
+
+        for (product, report, at) in cases {
+            let pushed = with_left_stick(report, 0xFF, 0x00, at);
+            let (x, y) = parse_left_stick(product, &pushed).expect("sticks");
+
+            assert!(x > 0.9, "{product:#06x} x {x}");
+            assert!(y < -0.9, "{product:#06x} y {y}");
+        }
+    }
+
+    #[test]
+    fn a_report_this_build_cannot_read_has_no_stick_either() {
+        let mut report = dualsense_usb(NEUTRAL, 0, 0);
+
+        report[0] = 0x02;
+
+        assert_eq!(parse_left_stick(DUALSENSE, &report), None);
     }
 
     #[test]
