@@ -41,6 +41,23 @@ test:
       command: cargo
       args: ["test", "-p", "poe-wayfinder-core", "--lib"]
 
+  # The crate is pure and the same everywhere, but the target is Windows and
+  # the arithmetic is not free to assume. WSL interop runs the Windows test
+  # binary from here, so the domain is measured on the arch it ships to.
+  - name: unit-windows
+    runner: go://generic-test-runner
+    spec:
+      command: cargo
+      args:
+        [
+          "test",
+          "-p",
+          "poe-wayfinder-core",
+          "--lib",
+          "--target",
+          "x86_64-pc-windows-gnu",
+        ]
+
   # Our parser against the upstream project's own 26 test items, plus the
   # hostile input suite.
   #
