@@ -29,8 +29,6 @@ If you need data from outside, declare a trait in `src/adapter/` and let
 
 ## How the parser works
 
-Read `../STUDY.md` section 1 first.
-
 The parser splits clipboard text on lines equal to `--------`, then runs an
 ordered list of stages. Each stage returns one of three outcomes.
 
@@ -45,10 +43,16 @@ five times in the pipeline. Each occurrence eats a different section.
 
 ## PoE1 and PoE2
 
-One parser. 35 of 50 stages are shared. See `../DESIGN.md` section 2.
+One parser. 35 of 50 stages are shared, measured against both references.
 
 `src/controller/parse/shared/` holds the 35. `poe1/` holds 11. `poe2/` holds
 15. Two builders assemble an ordered `Vec<Stage>` per game.
+
+The 11 are accessory, foulborn, heist contract, imbued gem, map tier, scrying
+orb, split, tincture, vaal gem name and vestigial. The 15 are augment sockets,
+apply augment sockets, elemental added, caster, charm slots, exceptional,
+jewelery, price note, requirements, runeforged, sanctified, spirit, timelost
+radius, trials and waystone.
 
 Never fork the crate per game. The delta is 30 percent.
 
