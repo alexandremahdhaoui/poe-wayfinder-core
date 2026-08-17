@@ -193,17 +193,28 @@ pub fn build_stat_filters(
 
     let mut wanted: Vec<String> = totals.iter().map(|t| t.reference.clone()).collect();
 
+    let pseudo_asked: Vec<String> = filters
+        .iter()
+        .filter(|filter| !filter.disabled && filter.id.starts_with("pseudo."))
+        .map(|filter| filter.id.clone())
+        .collect();
+
+    if !pseudo_asked.is_empty() {
+        use crate::controller::filter::pseudo::affects_pseudo;
+
+        wanted.retain(|reference| !affects_pseudo(reference));
+    }
+
     if let Some(item) = item {
-        use crate::controller::filter::item_property::{
-            armour_stats, remove_used_stats, weapon_stats,
-        };
+        use crate::controller::filter::item_property::remove_used_stats;
+        use crate::controller::filter::pseudo::{ARMOUR_STATS, WEAPON_STATS};
 
         if !item.armour.is_empty() {
-            remove_used_stats(&mut wanted, &armour_stats());
+            remove_used_stats(&mut wanted, ARMOUR_STATS);
         }
 
         if !item.weapon.is_empty() {
-            remove_used_stats(&mut wanted, &weapon_stats());
+            remove_used_stats(&mut wanted, WEAPON_STATS);
         }
     }
 
@@ -681,6 +692,51 @@ mod tests {
             "#% chance to Impale Enemies on Hit with Attacks",
             roll(25.0),
         )]
+    }
+
+    #[test]
+    fn a_resistance_is_not_asked_for_twice_when_the_total_is_already_asked_for() {
+        let mut trade = TradeInfo::default();
+
+        trade
+            .ids
+            .insert("pseudo".into(), vec!["pseudo.pseudo_total_resistance".into()]);
+
+        let table = FakeStats {
+            stats: vec![
+                stat_with(
+                    "+#% total Elemental Resistance",
+                    StatBetter::PositiveRoll,
+                    trade,
+                ),
+                stat_with(
+                    "#% to Fire Resistance",
+                    StatBetter::PositiveRoll,
+                    trade_with("explicit", "explicit.stat_fire_res"),
+                ),
+            ],
+        };
+
+        let got = build_stat_filters(
+            &[modifier(
+                ModifierType::Explicit,
+                "#% to Fire Resistance",
+                roll(40.0),
+            )],
+            None,
+            &table,
+            &StatFilterOptions::default(),
+        );
+
+        let group = got.and.expect("a stat group");
+        let ids: Vec<&str> = group.filters.iter().map(|f| f.id.as_str()).collect();
+
+        if ids.contains(&"pseudo.pseudo_total_resistance") {
+            assert!(
+                !ids.contains(&"explicit.stat_fire_res"),
+                "the total already covers the single resistance"
+            );
+        }
     }
 
     #[test]

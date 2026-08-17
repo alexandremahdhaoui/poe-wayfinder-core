@@ -97,7 +97,8 @@ pub fn review(item: &ParsedItem, decisions: &[(String, String)], profile: usize)
 
     for modifier in &item.modifiers {
         for stat in &modifier.stats {
-            let text = stat.reference.trim();
+            let text = stat.matched.trim();
+            let template = stat.reference.trim();
 
             if text.is_empty() {
                 continue;
@@ -105,7 +106,7 @@ pub fn review(item: &ParsedItem, decisions: &[(String, String)], profile: usize)
 
             let verdict = decisions
                 .iter()
-                .find(|(matcher, _)| matcher == text)
+                .find(|(matcher, _)| matcher == template)
                 .map(|(_, set)| verdict_of(set, profile))
                 .unwrap_or(Verdict::Unset);
 
@@ -142,6 +143,26 @@ pub fn headline(concerns: &[Concern]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_map_mod_is_shown_as_the_game_printed_it_not_as_a_template() {
+        let item = ParsedItem {
+            modifiers: vec![crate::controller::parse::shared::modifiers::ParsedModifier {
+                info: crate::types::modifier::ModifierInfo::default(),
+                stats: vec![crate::types::stat::ParsedStat {
+                    reference: "#% increased Monster Damage".to_string(),
+                    matched: "35% increased Monster Damage".to_string(),
+                    roll: None,
+                }],
+            }],
+            ..ParsedItem::default()
+        };
+
+        let got = review(&item, &[], 0);
+
+        assert_eq!(got[0].text, "35% increased Monster Damage");
+        assert!(!got[0].text.contains('#'), "nobody wants to read a template");
+    }
 
     #[test]
     fn a_verdict_round_trips_through_its_letter() {

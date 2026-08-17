@@ -231,34 +231,6 @@ pub fn base_percentile_filter(percentile: Option<f64>) -> Option<PropertyFilter>
     })
 }
 
-pub fn armour_stats() -> Vec<&'static str> {
-    use crate::controller::calc::base::{ARMOUR, ENERGY_SHIELD, EVASION};
-
-    let mut out = Vec::new();
-
-    for stats in [ARMOUR, EVASION, ENERGY_SHIELD] {
-        out.extend_from_slice(stats.flat);
-        out.extend_from_slice(stats.increased);
-    }
-
-    out.push("#% increased Block chance");
-    out
-}
-
-pub fn weapon_stats() -> Vec<&'static str> {
-    use crate::controller::calc::base::{ATTACK_SPEED, PHYSICAL_DAMAGE};
-
-    let mut out = Vec::new();
-
-    for stats in [PHYSICAL_DAMAGE, ATTACK_SPEED] {
-        out.extend_from_slice(stats.flat);
-        out.extend_from_slice(stats.increased);
-    }
-
-    out.push("#% to Critical Hit Chance");
-    out
-}
-
 pub fn remove_used_stats(stats: &mut Vec<String>, used: &[&str]) {
     stats.retain(|reference| !used.contains(&reference.as_str()));
 }

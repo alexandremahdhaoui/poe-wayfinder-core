@@ -15,7 +15,6 @@ pub mod rules;
 pub mod slots;
 pub mod stat_filters;
 pub mod unique;
-pub mod wording;
 
 pub use item_filters::{build_query, FilterOptions};
 pub use pseudo::{pseudo_totals, PseudoTotal};
