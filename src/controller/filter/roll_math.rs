@@ -47,19 +47,6 @@ pub fn percent_roll(value: f64, percent: f64, rounding: Rounding, precision: Pre
     rounding.apply(scaled(shifted, decimals)) / 10f64.powi(decimals as i32)
 }
 
-pub fn percent_roll_delta(
-    value: f64,
-    delta: f64,
-    percent: f64,
-    rounding: Rounding,
-    precision: Precision,
-) -> f64 {
-    let decimals = decimal_places(value, precision);
-    let shifted = value + (delta * percent) / 100.0;
-
-    rounding.apply(scaled(shifted, decimals)) / 10f64.powi(decimals as i32)
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorKind {
     None,
@@ -237,31 +224,6 @@ mod tests {
         assert_eq!(
             percent_roll(1.5, -10.0, Rounding::Down, Precision::Fractional),
             1.35
-        );
-    }
-
-    #[test]
-    fn a_delta_shift_scales_with_the_amount_given() {
-        let wide = percent_roll_delta(50.0, 99.0, -10.0, Rounding::Down, Precision::Whole);
-        let narrow = percent_roll_delta(50.0, 2.0, -10.0, Rounding::Down, Precision::Whole);
-
-        assert_eq!(wide, 40.0);
-        assert_eq!(narrow, 49.0);
-    }
-
-    #[test]
-    fn a_delta_shift_of_zero_leaves_the_roll_alone() {
-        assert_eq!(
-            percent_roll_delta(50.0, 0.0, -10.0, Rounding::Down, Precision::Whole),
-            50.0
-        );
-    }
-
-    #[test]
-    fn a_delta_shift_ignores_the_sign_of_the_roll() {
-        assert_eq!(
-            percent_roll_delta(-50.0, 100.0, 10.0, Rounding::Up, Precision::Whole),
-            -40.0
         );
     }
 

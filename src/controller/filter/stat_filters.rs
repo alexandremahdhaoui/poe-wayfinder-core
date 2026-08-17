@@ -545,10 +545,12 @@ fn bound_for(
 
     let widened = widen(value, options.roll_tolerance, effective);
 
-    match effective {
-        StatBetter::PositiveRoll => Range::at_least(widened),
-        StatBetter::NegativeRoll => Range::at_most(widened),
-        StatBetter::NotComparable => Range::default(),
+    use crate::controller::filter::rules::{fill_ends, FillEnds};
+
+    match fill_ends(effective) {
+        FillEnds::Min => Range::at_least(widened),
+        FillEnds::Max => Range::at_most(widened),
+        FillEnds::Both => Range::default(),
     }
 }
 
