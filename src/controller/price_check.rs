@@ -157,6 +157,8 @@ pub fn price_check_item(
         sources = built.sources;
     }
 
+    crate::controller::filter::mageblood::apply_legacy_rules(&item, &sources, &mut query);
+
     apply_heist_rules(&item, data, &mut query);
     apply_exclusions(&item, data, &mut query);
 

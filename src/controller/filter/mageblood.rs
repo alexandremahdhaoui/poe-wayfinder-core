@@ -1,3 +1,7 @@
+use crate::controller::filter::stat_filters::FilterSource;
+use crate::types::item::ParsedItem;
+use crate::types::query::{Range, StatFilter, StatGroup, StatGroupKind, TradeQuery};
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CountFilter {
     pub at_least: u32,
@@ -41,6 +45,73 @@ pub fn duplicates_filter(known: u32, duplicates: u32, active: bool) -> Option<Du
         at_least: 1,
         floors: vec![duplicates + 1],
     }))
+}
+
+pub const LEGACY_PREFIX: &str = "Legacy of ";
+
+pub fn apply_legacy_rules(item: &ParsedItem, sources: &[FilterSource], query: &mut TradeQuery) {
+    if item.info.reference_name != "Mageblood" {
+        return;
+    }
+
+    let printed = item
+        .modifiers
+        .iter()
+        .flat_map(|modifier| &modifier.stats)
+        .filter(|stat| stat.reference.starts_with(LEGACY_PREFIX))
+        .count() as u32;
+
+    if printed == 0 {
+        return;
+    }
+
+    let legacies: Vec<String> = sources
+        .iter()
+        .filter(|source| source.text.starts_with(LEGACY_PREFIX))
+        .map(|source| source.id.clone())
+        .collect();
+
+    if legacies.is_empty() {
+        return;
+    }
+
+    let known = legacies.len() as u32;
+    let duplicates = printed.saturating_sub(known);
+
+    match duplicates_filter(known, duplicates, true) {
+        None | Some(Duplicates::Plain) => {}
+        Some(Duplicates::AtStrength(at_least)) => {
+            raise_each(query, &legacies, f64::from(at_least));
+        }
+        Some(Duplicates::Counted(count)) => {
+            let mut group = StatGroup {
+                kind: StatGroupKind::Count,
+                value: Range::at_least(f64::from(count.at_least)),
+                filters: Vec::new(),
+                disabled: false,
+            };
+
+            for id in &legacies {
+                for floor in &count.floors {
+                    group
+                        .filters
+                        .push(StatFilter::range(id, Range::at_least(f64::from(*floor))));
+                }
+            }
+
+            query.stats.push(group);
+        }
+    }
+}
+
+fn raise_each(query: &mut TradeQuery, legacies: &[String], at_least: f64) {
+    for group in &mut query.stats {
+        for filter in &mut group.filters {
+            if legacies.contains(&filter.id) {
+                filter.range = Range::at_least(at_least);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -168,5 +239,146 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn belt(legacies: &[&str]) -> ParsedItem {
+        use crate::controller::parse::shared::modifiers::ParsedModifier;
+        use crate::types::item::BaseInfo;
+        use crate::types::modifier::{ModifierInfo, ModifierType};
+        use crate::types::stat::ParsedStat;
+
+        ParsedItem {
+            info: BaseInfo {
+                reference_name: "Mageblood".into(),
+                ..BaseInfo::default()
+            },
+            modifiers: legacies
+                .iter()
+                .map(|reference| ParsedModifier {
+                    info: ModifierInfo {
+                        kind: Some(ModifierType::Explicit),
+                        ..ModifierInfo::default()
+                    },
+                    stats: vec![ParsedStat {
+                        reference: (*reference).to_string(),
+                        matched: (*reference).to_string(),
+                        roll: None,
+                    }],
+                })
+                .collect(),
+            ..ParsedItem::default()
+        }
+    }
+
+    fn sources_for(ids: &[(&str, &str)]) -> Vec<FilterSource> {
+        ids.iter()
+            .map(|(id, text)| FilterSource {
+                id: (*id).to_string(),
+                text: (*text).to_string(),
+                roll: None,
+                tier: None,
+                contributors: Vec::new(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_belt_that_is_not_a_mageblood_is_left_alone() {
+        let mut item = belt(&["Legacy of Fury"]);
+        item.info.reference_name = "Leather Belt".into();
+
+        let mut query = TradeQuery::default();
+
+        apply_legacy_rules(
+            &item,
+            &sources_for(&[("explicit.stat_1", "Legacy of Fury")]),
+            &mut query,
+        );
+
+        assert!(query.stats.is_empty());
+    }
+
+    #[test]
+    fn four_readable_legacies_send_no_extra_group() {
+        let item = belt(&[
+            "Legacy of Fury",
+            "Legacy of Spite",
+            "Legacy of Guile",
+            "Legacy of Cunning",
+        ]);
+        let mut query = TradeQuery::default();
+
+        apply_legacy_rules(
+            &item,
+            &sources_for(&[
+                ("explicit.stat_1", "Legacy of Fury"),
+                ("explicit.stat_2", "Legacy of Spite"),
+                ("explicit.stat_3", "Legacy of Guile"),
+                ("explicit.stat_4", "Legacy of Cunning"),
+            ]),
+            &mut query,
+        );
+
+        assert!(query.stats.is_empty());
+    }
+
+    #[test]
+    fn one_readable_legacy_and_three_hidden_asks_for_it_at_full_strength() {
+        let item = belt(&[
+            "Legacy of Fury",
+            "Legacy of Fury",
+            "Legacy of Fury",
+            "Legacy of Fury",
+        ]);
+        let mut query = TradeQuery::default();
+
+        query.stats.push(StatGroup::all(vec![StatFilter::range(
+            "explicit.stat_1",
+            Range::at_least(1.0),
+        )]));
+
+        apply_legacy_rules(
+            &item,
+            &sources_for(&[("explicit.stat_1", "Legacy of Fury")]),
+            &mut query,
+        );
+
+        assert_eq!(query.stats[0].filters[0].range.min, Some(4.0));
+    }
+
+    #[test]
+    fn two_readable_legacies_and_two_hidden_send_a_count_group() {
+        let item = belt(&[
+            "Legacy of Fury",
+            "Legacy of Fury",
+            "Legacy of Spite",
+            "Legacy of Spite",
+        ]);
+        let mut query = TradeQuery::default();
+
+        apply_legacy_rules(
+            &item,
+            &sources_for(&[
+                ("explicit.stat_1", "Legacy of Fury"),
+                ("explicit.stat_2", "Legacy of Spite"),
+            ]),
+            &mut query,
+        );
+
+        let group = query.stats.last().expect("a count group");
+
+        assert_eq!(group.kind, StatGroupKind::Count);
+        assert_eq!(group.value.min, Some(4.0));
+        assert_eq!(group.filters.len(), 6);
+    }
+
+    #[test]
+    fn a_mageblood_with_no_legacy_lines_is_left_alone() {
+        let item = belt(&[]);
+        let mut query = TradeQuery::default();
+
+        apply_legacy_rules(&item, &[], &mut query);
+
+        assert!(query.stats.is_empty());
     }
 }
