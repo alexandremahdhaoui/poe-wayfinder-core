@@ -10,10 +10,6 @@ pub trait StatLookup {
     }
 }
 
-pub trait TradeStatLookup {
-    fn trade_stat_exists(&self, text: &str) -> bool;
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Namespace {
     Item,

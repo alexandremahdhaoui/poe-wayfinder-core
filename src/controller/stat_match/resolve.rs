@@ -1,4 +1,4 @@
-use crate::adapter::data_adapter::{StatLookup, TradeStatLookup};
+use crate::adapter::data_adapter::StatLookup;
 use crate::controller::stat_match::placeholder::{candidates, Candidate, NumMatch, StatString};
 use crate::types::stat::{ParsedStat, StatHit, StatRoll};
 use crate::util::number::roll_or_minmax_avg;
@@ -17,21 +17,6 @@ pub fn try_parse_translation(stat: &StatString, data: &dyn StatLookup) -> Option
     }
 
     None
-}
-
-pub fn try_secondary_parse_translation(
-    text: &str,
-    data: &dyn TradeStatLookup,
-) -> Option<ParsedStat> {
-    if !data.trade_stat_exists(text) {
-        return None;
-    }
-
-    Some(ParsedStat {
-        reference: text.to_string(),
-        matched: text.to_string(),
-        roll: None,
-    })
 }
 
 pub fn parse_roll(hit: &StatHit, candidate: &Candidate, stat: &StatString) -> Option<StatRoll> {
@@ -451,68 +436,5 @@ mod tests {
 
         assert_eq!(got.reference, "#% increased Attack Speed");
         assert_eq!(got.matched, "#% reduced Attack Speed");
-    }
-
-    struct FakeTradeStats {
-        known: Vec<&'static str>,
-    }
-
-    impl TradeStatLookup for FakeTradeStats {
-        fn trade_stat_exists(&self, text: &str) -> bool {
-            self.known.contains(&text)
-        }
-    }
-
-    #[test]
-    fn a_stat_the_trade_site_knows_is_matched_by_its_whole_text() {
-        let data = FakeTradeStats {
-            known: vec!["+15% to Brand New Resistance"],
-        };
-
-        let got = try_secondary_parse_translation("+15% to Brand New Resistance", &data)
-            .expect("a known stat matches");
-
-        assert_eq!(got.reference, "+15% to Brand New Resistance");
-        assert_eq!(got.matched, "+15% to Brand New Resistance");
-    }
-
-    #[test]
-    fn the_fallback_gives_no_roll() {
-        let data = FakeTradeStats {
-            known: vec!["+15% to Brand New Resistance"],
-        };
-
-        let got = try_secondary_parse_translation("+15% to Brand New Resistance", &data)
-            .expect("a known stat matches");
-
-        assert_eq!(got.roll, None);
-    }
-
-    #[test]
-    fn a_stat_neither_list_knows_is_left_unmatched() {
-        let data = FakeTradeStats { known: vec![] };
-
-        assert_eq!(try_secondary_parse_translation("Mystery line", &data), None);
-    }
-
-    #[test]
-    fn the_match_is_exact() {
-        let data = FakeTradeStats {
-            known: vec!["+15% to Brand New Resistance"],
-        };
-
-        assert_eq!(
-            try_secondary_parse_translation("+16% to Brand New Resistance", &data),
-            None
-        );
-    }
-
-    #[test]
-    fn an_empty_line_matches_nothing() {
-        let data = FakeTradeStats {
-            known: vec!["+15% to Brand New Resistance"],
-        };
-
-        assert_eq!(try_secondary_parse_translation("", &data), None);
     }
 }

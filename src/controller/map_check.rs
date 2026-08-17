@@ -85,6 +85,7 @@ pub fn set_verdict(decisions: &str, profile: usize, verdict: Verdict) -> String 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Concern {
     pub text: String,
+    pub reference: String,
     pub verdict: Verdict,
 }
 
@@ -112,6 +113,7 @@ pub fn review(item: &ParsedItem, decisions: &[(String, String)], profile: usize)
 
             out.push(Concern {
                 text: text.to_string(),
+                reference: template.to_string(),
                 verdict,
             });
         }
@@ -261,14 +263,17 @@ mod tests {
         let concerns = vec![
             Concern {
                 text: "a".into(),
+                reference: "a".into(),
                 verdict: Verdict::Good,
             },
             Concern {
                 text: "b".into(),
+                reference: "b".into(),
                 verdict: Verdict::Deadly,
             },
             Concern {
                 text: "c".into(),
+                reference: "c".into(),
                 verdict: Verdict::Warning,
             },
         ];
@@ -281,6 +286,7 @@ mod tests {
     fn a_warning_is_reported_when_nothing_is_deadly() {
         let concerns = vec![Concern {
             text: "a".into(),
+            reference: "a".into(),
             verdict: Verdict::Warning,
         }];
 
@@ -292,6 +298,7 @@ mod tests {
     fn a_map_with_nothing_marked_says_how_many_mods_it_has() {
         let concerns = vec![Concern {
             text: "a".into(),
+            reference: "a".into(),
             verdict: Verdict::Unset,
         }];
 
