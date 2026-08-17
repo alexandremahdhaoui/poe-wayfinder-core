@@ -416,7 +416,11 @@ fn numerics(check: &PriceCheck) -> Vec<Row> {
             continue;
         }
 
-        out.push(numeric_row(key, range, roll));
+        let mut row = numeric_row(key, range, roll);
+
+        row.bounds = property_bounds(check, key, roll);
+
+        out.push(row);
     }
 
     if let Some(sockets) = &item.gem_sockets {
@@ -464,6 +468,33 @@ fn fits_the_item(key: NumericKey, category: Option<crate::types::category::ItemC
         true => !category.is_accessory(),
         false => true,
     }
+}
+
+fn property_bounds(check: &PriceCheck, key: NumericKey, roll: Option<f64>) -> Option<(f64, f64)> {
+    use crate::controller::aggregate::sum_stats_by_type;
+    use crate::controller::calc::base::{
+        contributions, ARMOUR, ATTACK_SPEED, BLOCK, ENERGY_SHIELD, EVASION,
+    };
+    use crate::controller::calc::quality::prop_bounds;
+
+    let stats = match key {
+        NumericKey::Armour => ARMOUR,
+        NumericKey::Evasion => EVASION,
+        NumericKey::EnergyShield => ENERGY_SHIELD,
+        NumericKey::Block => BLOCK,
+        NumericKey::AttackSpeed => ATTACK_SPEED,
+        _ => return None,
+    };
+
+    let printed = roll?;
+    let totals = sum_stats_by_type(&check.item.modifiers);
+    let bounds = prop_bounds(printed, contributions(stats, &totals));
+
+    if (bounds.max - bounds.min).abs() < f64::EPSILON {
+        return None;
+    }
+
+    Some((bounds.min, bounds.max))
 }
 
 fn equipment_rows(check: &PriceCheck) -> Vec<(NumericKey, Range, Option<f64>)> {
@@ -1661,5 +1692,89 @@ mod tests {
             .numerics
             .iter()
             .any(|r| r.key == RowKey::Numeric(NumericKey::Armour)));
+    }
+
+    #[test]
+    fn an_armour_row_carries_the_span_its_modifiers_allow() {
+        use crate::types::category::ItemCategory;
+        use crate::types::item::ItemRarity;
+
+        use crate::controller::parse::shared::modifiers::ParsedModifier;
+        use crate::types::modifier::{ModifierInfo, ModifierType};
+        use crate::types::stat::{ParsedStat, StatRoll};
+
+        let mut item = ParsedItem {
+            category: Some(ItemCategory::BodyArmour),
+            rarity: Some(ItemRarity::Rare),
+            armour: crate::types::item::ArmourStats {
+                ar: Some(300.0),
+                ..crate::types::item::ArmourStats::default()
+            },
+            ..ParsedItem::default()
+        };
+
+        item.modifiers.push(ParsedModifier {
+            info: ModifierInfo {
+                kind: Some(ModifierType::Explicit),
+                ..ModifierInfo::default()
+            },
+            stats: vec![ParsedStat {
+                reference: "#% increased Armour".into(),
+                matched: "#% increased Armour".into(),
+                roll: Some(StatRoll {
+                    value: 50.0,
+                    min: 40.0,
+                    max: 60.0,
+                    ..StatRoll::default()
+                }),
+            }],
+        });
+
+        let mut query = TradeQuery::default();
+
+        query.filters.equipment_filters.ar = Range::at_least(300.0);
+
+        let check = check(item, query, Vec::new());
+        let view = build(&check);
+        let row = view
+            .numerics
+            .iter()
+            .find(|r| r.key == RowKey::Numeric(NumericKey::Armour))
+            .expect("an armour row");
+
+        let (min, max) = row.bounds.expect("the span the modifier allows");
+
+        assert!(min < max, "{min} to {max}");
+        assert!(min < 300.0 && max > 300.0, "{min} to {max}");
+    }
+
+    #[test]
+    fn a_property_with_nothing_contributing_shows_no_span() {
+        use crate::types::category::ItemCategory;
+        use crate::types::item::ItemRarity;
+
+        let item = ParsedItem {
+            category: Some(ItemCategory::BodyArmour),
+            rarity: Some(ItemRarity::Rare),
+            armour: crate::types::item::ArmourStats {
+                ar: Some(300.0),
+                ..crate::types::item::ArmourStats::default()
+            },
+            ..ParsedItem::default()
+        };
+
+        let mut query = TradeQuery::default();
+
+        query.filters.equipment_filters.ar = Range::at_least(300.0);
+
+        let check = check(item, query, Vec::new());
+        let view = build(&check);
+        let row = view
+            .numerics
+            .iter()
+            .find(|r| r.key == RowKey::Numeric(NumericKey::Armour))
+            .expect("an armour row");
+
+        assert_eq!(row.bounds, None);
     }
 }

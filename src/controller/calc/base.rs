@@ -42,6 +42,11 @@ pub const PHYSICAL_DAMAGE: PropStats = PropStats {
     increased: &["#% increased Physical Damage"],
 };
 
+pub const BLOCK: PropStats = PropStats {
+    flat: &[],
+    increased: &["#% increased Block chance"],
+};
+
 pub const ATTACK_SPEED: PropStats = PropStats {
     flat: &[],
     increased: &["#% increased Attack Speed"],
