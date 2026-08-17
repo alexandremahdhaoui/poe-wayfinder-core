@@ -14,6 +14,7 @@ pub mod gamepad_match;
 pub mod gamepad_nav;
 pub mod help;
 pub mod hotkey_match;
+pub mod item_diff;
 pub mod item_editor;
 pub mod item_links;
 pub mod item_search;
