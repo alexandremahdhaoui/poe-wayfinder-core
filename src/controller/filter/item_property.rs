@@ -351,7 +351,10 @@ mod tests {
         let printed = armour_filters(armour(Some(1000.0), None, None), Scaling::printed());
         let asked = armour_filters(armour(Some(1000.0), None, None), at_ten);
 
-        assert_eq!(printed[0].value, 1000.0, "the printed value is the printed value");
+        assert_eq!(
+            printed[0].value, 1000.0,
+            "the printed value is the printed value"
+        );
         assert!(
             asked[0].value > printed[0].value,
             "a ten percent quality chest must be searched as if it were twenty: {} vs {}",
@@ -393,7 +396,7 @@ mod tests {
         let got = weapon_filters(
             Some(ItemCategory::Bow),
             weapon(Some(100.0), None, Some(1.5)),
-        Scaling::printed(),
+            Scaling::printed(),
         );
 
         let pdps = got.iter().find(|f| f.id == "item.physical_dps").unwrap();
@@ -404,9 +407,12 @@ mod tests {
 
     #[test]
     fn a_weapon_with_no_attack_speed_gets_no_filters() {
-        assert!(
-            weapon_filters(Some(ItemCategory::Bow), weapon(Some(100.0), None, None), Scaling::printed()).is_empty()
-        );
+        assert!(weapon_filters(
+            Some(ItemCategory::Bow),
+            weapon(Some(100.0), None, None),
+            Scaling::printed()
+        )
+        .is_empty());
     }
 
     #[test]
@@ -419,7 +425,7 @@ mod tests {
                 spirit: None,
                 ..WeaponStats::default()
             },
-        Scaling::printed(),
+            Scaling::printed(),
         );
 
         assert!(got.is_empty());
@@ -435,7 +441,7 @@ mod tests {
                 physical: Some(50.0),
                 ..WeaponStats::default()
             },
-        Scaling::printed(),
+            Scaling::printed(),
         );
 
         assert_eq!(got.len(), 1);
@@ -448,7 +454,7 @@ mod tests {
         let got = weapon_filters(
             Some(ItemCategory::TwoHandedAxe),
             weapon(Some(200.0), Some(20.0), Some(1.2)),
-        Scaling::printed(),
+            Scaling::printed(),
         );
 
         let elemental = got.iter().find(|f| f.id == "item.elemental_dps").unwrap();
@@ -458,7 +464,12 @@ mod tests {
 
     #[test]
     fn a_weapon_with_no_damage_at_all_gets_no_filters() {
-        assert!(weapon_filters(Some(ItemCategory::Bow), weapon(None, None, Some(1.5)), Scaling::printed()).is_empty());
+        assert!(weapon_filters(
+            Some(ItemCategory::Bow),
+            weapon(None, None, Some(1.5)),
+            Scaling::printed()
+        )
+        .is_empty());
     }
 
     #[test]
@@ -466,7 +477,7 @@ mod tests {
         let got = weapon_filters(
             Some(ItemCategory::Bow),
             weapon(Some(100.0), Some(50.0), Some(2.0)),
-        Scaling::printed(),
+            Scaling::printed(),
         );
 
         let total = got.iter().find(|f| f.id == "item.total_dps").unwrap();

@@ -1,3 +1,4 @@
+use crate::controller::mod_desc::apply_incr;
 use crate::controller::parse::shared::modifiers::ParsedModifier;
 use crate::types::modifier::ModifierType;
 use crate::types::stat::StatRoll;
@@ -78,7 +79,10 @@ pub fn sum_stats_by_type(modifiers: &[ParsedModifier]) -> Vec<StatTotal> {
 
                     sources += 1;
 
-                    if let Some(roll) = other_stat.roll {
+                    if let Some(roll) = apply_incr(&other.info, other_stat)
+                        .and_then(|scaled| scaled.roll)
+                        .or(other_stat.roll)
+                    {
                         rolls.push(roll);
                     }
                 }
@@ -177,6 +181,33 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn a_modifier_carrying_an_increase_contributes_its_raised_roll() {
+        let mut raised = modifier(
+            ModifierType::Explicit,
+            vec![("+# to maximum Life", roll(50.0))],
+        );
+        raised.info.roll_incr = Some(20.0);
+
+        let totals = sum_stats_by_type(&[raised]);
+
+        assert_eq!(totals[0].roll.unwrap().value, 60.0);
+    }
+
+    #[test]
+    fn an_unscalable_roll_is_left_alone_by_an_increase() {
+        let mut raised = modifier(
+            ModifierType::Explicit,
+            vec![("+# to maximum Life", roll(50.0))],
+        );
+        raised.info.roll_incr = Some(20.0);
+        raised.stats[0].roll.as_mut().unwrap().unscalable = true;
+
+        let totals = sum_stats_by_type(&[raised]);
+
+        assert_eq!(totals[0].roll.unwrap().value, 50.0);
     }
 
     #[test]

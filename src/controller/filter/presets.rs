@@ -144,10 +144,7 @@ mod tests {
 
         it.area_level = Some(80);
 
-        assert_eq!(
-            ascendancy_area_level_filter(&it, Preset::Modifiers),
-            None
-        );
+        assert_eq!(ascendancy_area_level_filter(&it, Preset::Modifiers), None);
     }
 
     #[test]

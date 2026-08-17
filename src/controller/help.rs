@@ -36,6 +36,30 @@ pub fn widest_key(entries: &[Entry]) -> usize {
         .unwrap_or(0)
 }
 
+pub struct Missing {
+    pub what: &'static str,
+    pub why: &'static str,
+    pub how: &'static str,
+}
+
+pub fn client_log_is_missing(game_is_poe2: bool) -> Missing {
+    Missing {
+        what: "No Client.txt found.",
+        why: "This reads the game's own log, which is how it knows your level, \
+              the area you entered and the league a trade whisper came from.",
+        how: match game_is_poe2 {
+            true => {
+                "Point --client-log-path at it. It is usually under \
+                     Path of Exile 2\\logs\\Client.txt in your Steam library."
+            }
+            false => {
+                "Point --client-log-path at it. It is usually under \
+                      Path of Exile\\logs\\Client.txt in your Steam library."
+            }
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,25 +143,5 @@ mod tests {
     fn nothing_bound_is_an_empty_list_rather_than_a_panic() {
         assert!(entries(&[]).is_empty());
         assert_eq!(widest_key(&[]), 0);
-    }
-}
-
-pub struct Missing {
-    pub what: &'static str,
-    pub why: &'static str,
-    pub how: &'static str,
-}
-
-pub fn client_log_is_missing(game_is_poe2: bool) -> Missing {
-    Missing {
-        what: "No Client.txt found.",
-        why: "This reads the game's own log, which is how it knows your level, \
-              the area you entered and the league a trade whisper came from.",
-        how: match game_is_poe2 {
-            true => "Point --client-log-path at it. It is usually under \
-                     Path of Exile 2\\logs\\Client.txt in your Steam library.",
-            false => "Point --client-log-path at it. It is usually under \
-                      Path of Exile\\logs\\Client.txt in your Steam library.",
-        },
     }
 }

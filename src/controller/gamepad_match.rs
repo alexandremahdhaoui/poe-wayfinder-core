@@ -169,7 +169,6 @@ impl Watcher {
         }
     }
 
-
     pub fn react(&mut self, state: u16) -> Reaction {
         let Some(binding) = best_match(&self.bindings, state) else {
             self.firing = None;

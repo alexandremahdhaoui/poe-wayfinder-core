@@ -184,17 +184,15 @@ fn recalculate_properties(
 
         let fresh = recalculated(printed, stats, &before, &after, quality, modifiable);
 
-        range.min = Some(
-            crate::controller::filter::item_property::at_trade_quality(
-                fresh,
-                stats,
-                crate::controller::filter::item_property::Scaling {
-                    quality,
-                    modifiable,
-                    totals: &after,
-                },
-            ),
-        );
+        range.min = Some(crate::controller::filter::item_property::at_trade_quality(
+            fresh,
+            stats,
+            crate::controller::filter::item_property::Scaling {
+                quality,
+                modifiable,
+                totals: &after,
+            },
+        ));
     }
 }
 

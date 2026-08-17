@@ -154,7 +154,10 @@ mod tests {
 
         let got = recalculated(200.0, ARMOUR, &before, &after, 0.0, true);
 
-        assert!((got - 300.0).abs() < 0.001, "100 base at 200 percent, got {got}");
+        assert!(
+            (got - 300.0).abs() < 0.001,
+            "100 base at 200 percent, got {got}"
+        );
     }
 
     fn close(a: f64, b: f64) -> bool {

@@ -25,7 +25,9 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use poe_wayfinder_core::controller::filter::item_property::{armour_filters, weapon_filters};
+use poe_wayfinder_core::controller::filter::item_property::{
+    armour_filters, weapon_filters, Scaling,
+};
 use poe_wayfinder_core::types::item::{ArmourStats, WeaponStats};
 use poe_wayfinder_core::types::ItemCategory;
 
@@ -88,7 +90,7 @@ fn every_armour_id_we_send_is_one_a_reference_sends() {
             ..ArmourStats::default()
         },
     ] {
-        for filter in armour_filters(armour) {
+        for filter in armour_filters(armour, Scaling::printed()) {
             assert!(
                 accepted.contains(filter.id),
                 "{} is not an id either reference sends. The trade api answers \
@@ -117,7 +119,7 @@ fn every_weapon_id_we_send_is_one_a_reference_sends() {
     };
 
     for category in [ItemCategory::OneHandedSword, ItemCategory::Bow] {
-        for filter in weapon_filters(Some(category), weapon) {
+        for filter in weapon_filters(Some(category), weapon, Scaling::printed()) {
             assert!(
                 accepted.contains(filter.id),
                 "{} is not an id either reference sends.",

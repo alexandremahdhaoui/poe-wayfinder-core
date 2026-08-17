@@ -59,7 +59,7 @@ fn the_harness_prices_every_fixture_rather_than_skipping_them() {
     let priced = fixtures()
         .into_iter()
         .filter(|(_, text)| {
-            price_check(text, &NO_DATA, PriceCheckOptions::new(GameVersion::Poe2)).is_ok()
+            price_check(text, &NO_DATA, &PriceCheckOptions::new(GameVersion::Poe2)).is_ok()
         })
         .count();
 
@@ -74,7 +74,7 @@ fn a_query_built_with_no_data_reports_that_it_narrows_nothing() {
     let unconstrained = fixtures()
         .into_iter()
         .filter(|(_, text)| {
-            price_check(text, &NO_DATA, PriceCheckOptions::new(GameVersion::Poe2))
+            price_check(text, &NO_DATA, &PriceCheckOptions::new(GameVersion::Poe2))
                 .is_ok_and(|c| !c.constrains_something())
         })
         .count();
@@ -93,7 +93,7 @@ fn every_upstream_item_produces_a_query_in_both_games() {
     // user with the item still on their clipboard.
     for (name, text) in fixtures() {
         for game in GAMES {
-            let got = price_check(&text, &NO_DATA, PriceCheckOptions::new(game));
+            let got = price_check(&text, &NO_DATA, &PriceCheckOptions::new(game));
 
             assert!(got.is_ok(), "{name} in {game:?}: {:?}", got.err());
         }
@@ -106,7 +106,7 @@ fn every_query_asks_for_something() {
     // site. The user sees a price for the whole market and no sign it is wrong.
     for (name, text) in fixtures() {
         for game in GAMES {
-            let Ok(check) = price_check(&text, &NO_DATA, PriceCheckOptions::new(game)) else {
+            let Ok(check) = price_check(&text, &NO_DATA, &PriceCheckOptions::new(game)) else {
                 continue;
             };
 
@@ -127,7 +127,7 @@ fn no_stat_filter_has_a_floor_above_its_ceiling() {
     // clue why. It is the shape a sign error produces.
     for (name, text) in fixtures() {
         for game in GAMES {
-            let Ok(check) = price_check(&text, &NO_DATA, PriceCheckOptions::new(game)) else {
+            let Ok(check) = price_check(&text, &NO_DATA, &PriceCheckOptions::new(game)) else {
                 continue;
             };
 
@@ -154,7 +154,7 @@ fn no_query_carries_a_filter_id_twice() {
     // silently dropped and the search is looser than the panel says.
     for (name, text) in fixtures() {
         for game in GAMES {
-            let Ok(check) = price_check(&text, &NO_DATA, PriceCheckOptions::new(game)) else {
+            let Ok(check) = price_check(&text, &NO_DATA, &PriceCheckOptions::new(game)) else {
                 continue;
             };
 
@@ -176,7 +176,7 @@ fn an_exchange_route_always_carries_a_tag() {
     // sees an error rather than a price.
     for (name, text) in fixtures() {
         for game in GAMES {
-            let Ok(check) = price_check(&text, &NO_DATA, PriceCheckOptions::new(game)) else {
+            let Ok(check) = price_check(&text, &NO_DATA, &PriceCheckOptions::new(game)) else {
                 continue;
             };
 
@@ -193,7 +193,7 @@ fn a_search_route_never_carries_a_tag() {
     // unread field that looks like it did something.
     for (name, text) in fixtures() {
         for game in GAMES {
-            let Ok(check) = price_check(&text, &NO_DATA, PriceCheckOptions::new(game)) else {
+            let Ok(check) = price_check(&text, &NO_DATA, &PriceCheckOptions::new(game)) else {
                 continue;
             };
 
@@ -216,7 +216,7 @@ fn every_unmatched_modifier_is_reported_rather_than_dropped() {
     assert!(interesting > 0, "the fixtures carry no sectioned items");
 
     for (name, text) in fixtures() {
-        let Ok(check) = price_check(&text, &NO_DATA, PriceCheckOptions::new(GameVersion::Poe2))
+        let Ok(check) = price_check(&text, &NO_DATA, &PriceCheckOptions::new(GameVersion::Poe2))
         else {
             continue;
         };
@@ -234,8 +234,8 @@ fn pricing_is_deterministic() {
     // A query that differs between runs cannot be reasoned about, and a user
     // pressing the key twice would get two prices for one item.
     for (name, text) in fixtures() {
-        let first = price_check(&text, &NO_DATA, PriceCheckOptions::new(GameVersion::Poe2));
-        let second = price_check(&text, &NO_DATA, PriceCheckOptions::new(GameVersion::Poe2));
+        let first = price_check(&text, &NO_DATA, &PriceCheckOptions::new(GameVersion::Poe2));
+        let second = price_check(&text, &NO_DATA, &PriceCheckOptions::new(GameVersion::Poe2));
 
         assert_eq!(first.is_ok(), second.is_ok(), "{name}");
 
@@ -257,7 +257,7 @@ fn every_fixture_survives_being_truncated_anywhere() {
             }
 
             for game in GAMES {
-                let _ = price_check(&text[..end], &NO_DATA, PriceCheckOptions::new(game));
+                let _ = price_check(&text[..end], &NO_DATA, &PriceCheckOptions::new(game));
             }
         }
 
@@ -270,17 +270,14 @@ fn every_fixture_survives_being_truncated_anywhere() {
 fn a_fixture_with_every_line_repeated_still_prices() {
     // A user copying twice into one clipboard is common enough, and the
     // duplicate section is what found the quadratic scan in the parser.
-    for (name, text) in fixtures() {
+    for (_name, text) in fixtures() {
         let doubled = format!("{text}\n{text}");
 
-        let got = price_check(
+        let _ = price_check(
             &doubled,
             &NO_DATA,
-            PriceCheckOptions::new(GameVersion::Poe2),
+            &PriceCheckOptions::new(GameVersion::Poe2),
         );
-
-        // Either answer is fine. Panicking is not.
-        assert!(got.is_ok() || got.is_err(), "{name}");
     }
 }
 
@@ -295,7 +292,7 @@ fn most_upstream_items_now_carry_a_category() {
     let with_category = fixtures()
         .into_iter()
         .filter(|(_, text)| {
-            price_check(text, &NO_DATA, PriceCheckOptions::new(GameVersion::Poe2))
+            price_check(text, &NO_DATA, &PriceCheckOptions::new(GameVersion::Poe2))
                 .is_ok_and(|c| c.item.category.is_some())
         })
         .count();

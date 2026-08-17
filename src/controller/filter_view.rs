@@ -484,18 +484,9 @@ fn equipment_rows(check: &PriceCheck) -> Vec<(NumericKey, Range, Option<f64>)> {
         };
 
         for (field, stats) in [
-            (
-                &mut armour.ar,
-                crate::controller::calc::base::ARMOUR,
-            ),
-            (
-                &mut armour.ev,
-                crate::controller::calc::base::EVASION,
-            ),
-            (
-                &mut armour.es,
-                crate::controller::calc::base::ENERGY_SHIELD,
-            ),
+            (&mut armour.ar, crate::controller::calc::base::ARMOUR),
+            (&mut armour.ev, crate::controller::calc::base::EVASION),
+            (&mut armour.es, crate::controller::calc::base::ENERGY_SHIELD),
         ] {
             if let Some(printed) = field.filter(|value| *value > 0.0) {
                 *field = Some(at_trade_quality(printed, stats, scaling));

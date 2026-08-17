@@ -2,6 +2,7 @@ use crate::adapter::data_adapter::StatLookup;
 use crate::controller::aggregate::sum_stats_by_type;
 use crate::controller::filter::item_property::{armour_filters, weapon_filters};
 use crate::controller::filter::pseudo::pseudo_totals;
+use crate::controller::filter::roll_math::{percent_roll, Precision, Rounding};
 use crate::controller::filter::rules::{
     hidden_reason, should_enable, ItemFacts, GOOD_ROLL_THRESHOLD,
 };
@@ -555,18 +556,13 @@ fn bound_for(
 }
 
 fn widen(value: f64, tolerance: f64, better: StatBetter) -> f64 {
-    let magnitude = value.abs() * tolerance;
-
-    let moved = match better {
-        StatBetter::PositiveRoll => value - magnitude,
-        StatBetter::NegativeRoll => value + magnitude,
-        StatBetter::NotComparable => value,
+    let (percent, rounding) = match better {
+        StatBetter::PositiveRoll => (-tolerance * 100.0, Rounding::Down),
+        StatBetter::NegativeRoll => (tolerance * 100.0, Rounding::Up),
+        StatBetter::NotComparable => (0.0, Rounding::Up),
     };
 
-    match better {
-        StatBetter::PositiveRoll => (moved * 10.0).floor() / 10.0,
-        _ => (moved * 10.0).ceil() / 10.0,
-    }
+    percent_roll(value, percent, rounding, Precision::Fixed(1))
 }
 
 #[cfg(test)]
@@ -700,9 +696,10 @@ mod tests {
     fn a_resistance_is_not_asked_for_twice_when_the_total_is_already_asked_for() {
         let mut trade = TradeInfo::default();
 
-        trade
-            .ids
-            .insert("pseudo".into(), vec!["pseudo.pseudo_total_resistance".into()]);
+        trade.ids.insert(
+            "pseudo".into(),
+            vec!["pseudo.pseudo_total_resistance".into()],
+        );
 
         let table = FakeStats {
             stats: vec![
@@ -784,7 +781,11 @@ mod tests {
         item.armour.ar = Some(1000.0);
 
         let got = build_stat_filters(
-            &[modifier(ModifierType::Explicit, "# to maximum Life", roll(80.0))],
+            &[modifier(
+                ModifierType::Explicit,
+                "# to maximum Life",
+                roll(80.0),
+            )],
             Some(&item),
             &life_table(),
             &StatFilterOptions::default(),
@@ -913,7 +914,11 @@ mod tests {
         };
 
         let got = build_stat_filters(
-            &[modifier(ModifierType::Augment, "# to maximum Life", roll(80.0))],
+            &[modifier(
+                ModifierType::Augment,
+                "# to maximum Life",
+                roll(80.0),
+            )],
             None,
             &table,
             &options,
@@ -938,7 +943,11 @@ mod tests {
         };
 
         let got = build_stat_filters(
-            &[modifier(ModifierType::Augment, "# to maximum Life", roll(80.0))],
+            &[modifier(
+                ModifierType::Augment,
+                "# to maximum Life",
+                roll(80.0),
+            )],
             None,
             &table,
             &StatFilterOptions::default(),
@@ -955,7 +964,11 @@ mod tests {
     #[test]
     fn a_stat_the_item_rolled_itself_is_not_hidden_by_that_rule() {
         let got = build_stat_filters(
-            &[modifier(ModifierType::Explicit, "# to maximum Life", roll(80.0))],
+            &[modifier(
+                ModifierType::Explicit,
+                "# to maximum Life",
+                roll(80.0),
+            )],
             None,
             &life_table(),
             &StatFilterOptions::default(),

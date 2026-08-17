@@ -184,5 +184,4 @@ mod tests {
         assert_eq!(weapon.elemental, Some(10.0));
         assert_eq!(weapon.cold, None);
     }
-
 }

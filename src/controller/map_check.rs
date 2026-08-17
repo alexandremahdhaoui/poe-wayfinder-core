@@ -147,21 +147,26 @@ mod tests {
     #[test]
     fn a_map_mod_is_shown_as_the_game_printed_it_not_as_a_template() {
         let item = ParsedItem {
-            modifiers: vec![crate::controller::parse::shared::modifiers::ParsedModifier {
-                info: crate::types::modifier::ModifierInfo::default(),
-                stats: vec![crate::types::stat::ParsedStat {
-                    reference: "#% increased Monster Damage".to_string(),
-                    matched: "35% increased Monster Damage".to_string(),
-                    roll: None,
-                }],
-            }],
+            modifiers: vec![
+                crate::controller::parse::shared::modifiers::ParsedModifier {
+                    info: crate::types::modifier::ModifierInfo::default(),
+                    stats: vec![crate::types::stat::ParsedStat {
+                        reference: "#% increased Monster Damage".to_string(),
+                        matched: "35% increased Monster Damage".to_string(),
+                        roll: None,
+                    }],
+                },
+            ],
             ..ParsedItem::default()
         };
 
         let got = review(&item, &[], 0);
 
         assert_eq!(got[0].text, "35% increased Monster Damage");
-        assert!(!got[0].text.contains('#'), "nobody wants to read a template");
+        assert!(
+            !got[0].text.contains('#'),
+            "nobody wants to read a template"
+        );
     }
 
     #[test]

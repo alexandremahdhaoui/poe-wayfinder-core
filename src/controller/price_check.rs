@@ -62,6 +62,14 @@ pub fn price_check(
 ) -> Result<PriceCheck, ParseError> {
     let item = parse_clipboard(clipboard, options.game, data)?;
 
+    Ok(price_check_item(item, data, options))
+}
+
+pub fn price_check_item(
+    item: ParsedItem,
+    data: &dyn GameData,
+    options: &PriceCheckOptions,
+) -> PriceCheck {
     let mut query = build_query(&item, options.filters);
 
     let mut stats = options.stats.clone();
@@ -82,8 +90,8 @@ pub fn price_check(
     );
 
     stats.hide_augments = tweaks.hide_augments;
-    stats.hide_anointment = crate::controller::filter::unique::anointment(&item).is_some()
-        && item.is_modifiable();
+    stats.hide_anointment =
+        crate::controller::filter::unique::anointment(&item).is_some() && item.is_modifiable();
     stats.valuable_rooms = crate::controller::filter::unique::valuable_rooms(&item.atzoatl_rooms)
         .into_iter()
         .map(str::to_string)
@@ -172,7 +180,7 @@ pub fn price_check(
 
     let endpoint = endpoint_for(&route);
 
-    Ok(PriceCheck {
+    PriceCheck {
         trade_tag: match endpoint {
             Endpoint::Exchange => item.info.trade_tag.clone(),
             Endpoint::Search => None,
@@ -181,7 +189,7 @@ pub fn price_check(
         query,
         endpoint,
         sources,
-    })
+    }
 }
 
 fn apply_exclusions(item: &ParsedItem, data: &dyn GameData, query: &mut TradeQuery) {

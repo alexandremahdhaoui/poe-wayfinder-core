@@ -66,7 +66,6 @@ impl Watcher {
         }
     }
 
-
     pub fn react(&mut self, event: KeyEvent) -> Reaction {
         if is_modifier_code(event.code) {
             return Reaction::Ignore;

@@ -1,3 +1,4 @@
+use crate::controller::filter::roll_math::{round_roll, Precision};
 use crate::types::client_strings as cs;
 use crate::types::modifier::{Generation, ModifierInfo, ModifierType};
 use crate::types::stat::ParsedStat;
@@ -209,9 +210,8 @@ fn eldritch_rank(head: &str) -> Option<u32> {
 
 pub fn incr_roll(value: f64, percent: f64, decimals: u32) -> f64 {
     let raised = value + (value * percent) / 100.0;
-    let scale = 10f64.powi(decimals as i32);
 
-    (raised * scale).trunc() / scale
+    round_roll(raised, Precision::Fixed(decimals))
 }
 
 pub fn apply_incr(info: &ModifierInfo, stat: &ParsedStat) -> Option<ParsedStat> {

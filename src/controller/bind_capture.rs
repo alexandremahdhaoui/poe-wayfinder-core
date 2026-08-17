@@ -108,7 +108,9 @@ mod tests {
 
         capture.listen(Row::Keyboard);
 
-        let got = capture.from_key("D", true, false, false).expect("a binding");
+        let got = capture
+            .from_key("D", true, false, false)
+            .expect("a binding");
 
         assert_eq!(got.row, Row::Keyboard);
         assert_eq!(got.text, "Ctrl + D");
