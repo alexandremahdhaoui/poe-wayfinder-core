@@ -32,11 +32,11 @@ pub fn apply_elemental_rune(
         return;
     }
 
-    if values.len() != 2 {
-        return;
-    }
-
-    let adding = (values[0] + values[1]) / 2.0;
+    let adding = match values {
+        [only] => *only,
+        [low, high] => (low + high) / 2.0,
+        _ => return,
+    };
 
     add(&mut weapon.elemental, adding);
 
@@ -160,8 +160,23 @@ mod tests {
     }
 
     #[test]
+    fn one_value_is_the_whole_amount_because_our_data_holds_the_average() {
+        let mut weapon = bow();
+
+        apply_elemental_rune(
+            &mut weapon,
+            Some(ItemCategory::Bow),
+            Some(RuneElement::Cold),
+            &[6.0],
+        );
+
+        assert_eq!(weapon.cold, Some(6.0));
+        assert_eq!(weapon.elemental, Some(6.0));
+    }
+
+    #[test]
     fn a_malformed_range_adds_nothing() {
-        for values in [vec![5.0], vec![5.0, 10.0, 15.0], vec![]] {
+        for values in [vec![5.0, 10.0, 15.0], vec![]] {
             let mut weapon = bow();
 
             apply_elemental_rune(

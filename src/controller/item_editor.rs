@@ -194,6 +194,54 @@ fn recalculate_properties(
             },
         ));
     }
+
+    raise_elemental_damage(item, augment, category, sockets, equipment);
+}
+
+fn raise_elemental_damage(
+    item: &ParsedItem,
+    augment: &Augment,
+    category: ItemCategory,
+    sockets: u32,
+    equipment: &mut crate::types::query::EquipmentFilters,
+) {
+    use crate::controller::calc::preview::{apply_elemental_rune, rune_element};
+    use crate::controller::filter::augments::effect_for_category;
+
+    let Some(element) = rune_element(&augment.name) else {
+        return;
+    };
+
+    let Some(effect) = effect_for_category(augment, category) else {
+        return;
+    };
+
+    let Some(attack_speed) = item.weapon.attack_speed else {
+        return;
+    };
+
+    let mut weapon = item.weapon;
+
+    apply_elemental_rune(
+        &mut weapon,
+        Some(category),
+        Some(element),
+        &[effect.value * f64::from(sockets)],
+    );
+
+    let Some(elemental) = weapon.elemental else {
+        return;
+    };
+
+    if equipment.edps.min.is_some() {
+        equipment.edps.min = Some(elemental * attack_speed);
+    }
+
+    if equipment.dps.min.is_some() {
+        let physical = weapon.physical.unwrap_or(0.0);
+
+        equipment.dps.min = Some((physical + elemental) * attack_speed);
+    }
 }
 
 pub fn empty_sockets(item: &ParsedItem) -> u32 {
@@ -598,5 +646,92 @@ mod tests {
         editor.choose("Iron Rune", &augments, &armour(), &mut query);
 
         assert!(editor.is_applied());
+    }
+
+    use crate::types::item::WeaponStats;
+
+    fn glacial_rune() -> Augment {
+        Augment {
+            reference_name: "Glacial Rune".into(),
+            name: "Glacial Rune".into(),
+            effects: vec![AugmentEffect {
+                reference: "Adds # to # Cold Damage".into(),
+                trade_id: rune_id("cold"),
+                value: 6.0,
+                categories: vec![ItemCategory::Bow],
+            }],
+        }
+    }
+
+    fn bow_with_one_empty_socket() -> ParsedItem {
+        ParsedItem {
+            category: Some(ItemCategory::Bow),
+            rarity: Some(ItemRarity::Rare),
+            augment_sockets: Some(AugmentSockets {
+                empty: 1,
+                current: 0,
+                normal: 1,
+            }),
+            weapon: WeaponStats {
+                attack_speed: Some(2.0),
+                physical: Some(50.0),
+                elemental: Some(10.0),
+                ..WeaponStats::default()
+            },
+            ..ParsedItem::default()
+        }
+    }
+
+    #[test]
+    fn socketing_an_elemental_rune_raises_the_elemental_damage_filter() {
+        let item = bow_with_one_empty_socket();
+        let mut query = query_with(&rune_id("cold"), 0.0);
+
+        query.filters.equipment_filters.edps = Range::at_least(20.0);
+        query.filters.equipment_filters.dps = Range::at_least(120.0);
+
+        let mut editor = ItemEditor::default();
+
+        assert!(editor.choose("Glacial Rune", &[glacial_rune()], &item, &mut query));
+
+        assert_eq!(query.filters.equipment_filters.edps.min, Some(32.0));
+        assert_eq!(query.filters.equipment_filters.dps.min, Some(132.0));
+    }
+
+    #[test]
+    fn a_filter_the_user_never_asked_for_is_not_turned_on_by_a_rune() {
+        let item = bow_with_one_empty_socket();
+        let mut query = query_with(&rune_id("cold"), 0.0);
+
+        let mut editor = ItemEditor::default();
+
+        assert!(editor.choose("Glacial Rune", &[glacial_rune()], &item, &mut query));
+
+        assert_eq!(query.filters.equipment_filters.edps.min, None);
+    }
+
+    #[test]
+    fn a_rune_with_no_element_leaves_the_damage_filters_alone() {
+        let item = bow_with_one_empty_socket();
+        let mut query = query_with(&rune_id("cold"), 0.0);
+
+        query.filters.equipment_filters.edps = Range::at_least(20.0);
+
+        let iron = Augment {
+            reference_name: "Iron Rune".into(),
+            name: "Iron Rune".into(),
+            effects: vec![AugmentEffect {
+                reference: "#% increased Physical Damage".into(),
+                trade_id: rune_id("cold"),
+                value: 20.0,
+                categories: vec![ItemCategory::Bow],
+            }],
+        };
+
+        let mut editor = ItemEditor::default();
+
+        assert!(editor.choose("Iron Rune", &[iron], &item, &mut query));
+
+        assert_eq!(query.filters.equipment_filters.edps.min, Some(20.0));
     }
 }
