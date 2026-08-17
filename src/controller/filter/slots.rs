@@ -141,22 +141,6 @@ pub fn empty_slot(item: &ParsedItem) -> Option<EmptySlot> {
     }
 }
 
-pub fn likely_finished(item: &ParsedItem) -> bool {
-    if !item.is_modifiable() {
-        return true;
-    }
-
-    let counts = explicit_modifier_count(&item.modifiers);
-
-    if counts.total() == 0 {
-        return false;
-    }
-
-    let max = max_modifiers_of_type(item.category, item.rarity);
-
-    counts.prefixes >= max && counts.suffixes >= max
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PassiveBound {
     Exact,
@@ -456,39 +440,6 @@ mod tests {
             empty_slot(&rare(vec![modifier(ModifierType::Explicit, None)])),
             None
         );
-    }
-
-    #[test]
-    fn a_full_rare_is_finished() {
-        let mut modifiers = Vec::new();
-
-        for _ in 0..3 {
-            modifiers.push(modifier(ModifierType::Explicit, Some(Generation::Prefix)));
-            modifiers.push(modifier(ModifierType::Explicit, Some(Generation::Suffix)));
-        }
-
-        assert!(likely_finished(&rare(modifiers)));
-    }
-
-    #[test]
-    fn a_rare_with_room_is_not_finished() {
-        assert!(!likely_finished(&rare(vec![modifier(
-            ModifierType::Explicit,
-            Some(Generation::Prefix)
-        )])));
-    }
-
-    #[test]
-    fn a_corrupted_item_is_finished_whatever_it_carries() {
-        let item = ParsedItem {
-            is_corrupted: true,
-            ..rare(vec![modifier(
-                ModifierType::Explicit,
-                Some(Generation::Prefix),
-            )])
-        };
-
-        assert!(likely_finished(&item));
     }
 
     #[test]
