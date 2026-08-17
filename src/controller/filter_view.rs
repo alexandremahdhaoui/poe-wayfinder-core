@@ -175,12 +175,11 @@ pub fn modifier_text(text: &str, roll: Option<f64>, decimals: bool) -> String {
         return text.to_string();
     }
 
-    let rendered = match decimals {
-        true => format!("{roll:.2}"),
-        false => format!("{}", roll.round() as i64),
-    };
+    if decimals {
+        return text.replacen('#', &format!("{roll:.2}"), 1);
+    }
 
-    text.replacen('#', &rendered, 1)
+    crate::controller::parse::magic_name::fill_placeholders(text, &[roll.round()])
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -810,6 +809,16 @@ mod tests {
                 contributors: Vec::new(),
             }],
         )
+    }
+
+    #[test]
+    fn a_huge_roll_is_printed_as_a_number_rather_than_saturating() {
+        let got = modifier_text("# to maximum Life", Some(1.0e18), false);
+
+        assert!(
+            !got.contains("9223372036854775807"),
+            "an i64 cast saturates and prints a number nobody rolled: {got}"
+        );
     }
 
     #[test]
