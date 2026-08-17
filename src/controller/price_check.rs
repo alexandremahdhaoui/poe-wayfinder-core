@@ -4,7 +4,6 @@ use crate::controller::filter::item_filters::{build_query, FilterOptions};
 use crate::controller::filter::presets::{
     gem_level_filter, preset_for, trials_filter, uses_item_properties, uses_modifiers,
 };
-use crate::controller::filter::slots::EmptySlot;
 use crate::controller::filter::stat_filters::{build_stat_filters, StatFilterOptions};
 use crate::controller::parse::{parse_clipboard, ParseError};
 use crate::types::game::GameVersion;
@@ -111,8 +110,9 @@ pub fn price_check_item(
     }
 
     if tweaks.show_empty_modifier {
-        query.filters.misc_filters.has_empty_modifier =
-            crate::controller::filter::slots::empty_slot(&item).map(EmptySlot::trade_option);
+        if let Some(group) = crate::controller::filter::slots::empty_modifier_group(&item, data) {
+            query.stats.push(group);
+        }
     }
 
     let preset = preset_for(&item);

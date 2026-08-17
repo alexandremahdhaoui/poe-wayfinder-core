@@ -88,13 +88,35 @@ pub enum EmptySlot {
 }
 
 impl EmptySlot {
-    pub fn trade_option(self) -> f64 {
+    pub fn pseudo_reference(self) -> &'static str {
         match self {
-            EmptySlot::Either => 0.0,
-            EmptySlot::Prefix => 1.0,
-            EmptySlot::Suffix => 2.0,
+            EmptySlot::Either => "# Empty Modifiers",
+            EmptySlot::Prefix => "# Empty Prefix Modifiers",
+            EmptySlot::Suffix => "# Empty Suffix Modifiers",
         }
     }
+}
+
+pub fn empty_modifier_group(
+    item: &ParsedItem,
+    data: &dyn crate::adapter::data_adapter::StatLookup,
+) -> Option<crate::types::query::StatGroup> {
+    use crate::types::modifier::ModifierType;
+    use crate::types::query::{Range, StatFilter, StatGroup, StatGroupKind};
+
+    let slot = empty_slot(item)?;
+    let hit = data.stat_by_matcher(slot.pseudo_reference())?;
+    let id = hit.stat.trade.ids_for(ModifierType::Pseudo)?.first()?;
+
+    Some(StatGroup {
+        kind: StatGroupKind::Count,
+        value: Range {
+            min: Some(1.0),
+            max: Some(1.0),
+        },
+        filters: vec![StatFilter::range(id, Range::at_least(1.0))],
+        disabled: false,
+    })
 }
 
 pub fn empty_slot(item: &ParsedItem) -> Option<EmptySlot> {
@@ -478,5 +500,78 @@ mod tests {
         assert!(is_hidden_by_default(ModifierType::AddedAugment));
         assert!(!is_hidden_by_default(ModifierType::Explicit));
         assert!(!is_hidden_by_default(ModifierType::Implicit));
+    }
+
+    #[test]
+    fn an_empty_slot_asks_for_the_pseudo_stat_in_a_count_group() {
+        use crate::adapter::data_adapter::StatLookup;
+        use crate::types::modifier::ModifierType;
+        use crate::types::query::StatGroupKind;
+        use crate::types::stat::{Stat, StatHit, StatMatcher, TradeInfo};
+
+        struct Pseudo {
+            stat: Stat,
+            matcher: StatMatcher,
+        }
+
+        impl StatLookup for Pseudo {
+            fn stat_by_matcher(&self, template: &str) -> Option<StatHit<'_>> {
+                match template.starts_with("# Empty ") {
+                    true => Some(StatHit {
+                        stat: &self.stat,
+                        matcher: &self.matcher,
+                    }),
+                    false => None,
+                }
+            }
+        }
+
+        let mut ids = std::collections::BTreeMap::new();
+
+        ids.insert(
+            ModifierType::Pseudo.as_str().to_string(),
+            vec!["pseudo.pseudo_number_of_empty_prefix_mods".to_string()],
+        );
+
+        let data = Pseudo {
+            stat: Stat {
+                reference: "# Empty Modifiers".into(),
+                trade: TradeInfo {
+                    ids,
+                    ..TradeInfo::default()
+                },
+                ..Stat::default()
+            },
+            matcher: StatMatcher {
+                string: "# Empty Modifiers".into(),
+                ..StatMatcher::default()
+            },
+        };
+
+        let item = rare(vec![modifier(
+            ModifierType::Explicit,
+            Some(Generation::Prefix),
+        )]);
+        let group = empty_modifier_group(&item, &data).expect("a count group");
+
+        assert_eq!(group.kind, StatGroupKind::Count);
+        assert_eq!(group.value.min, Some(1.0));
+        assert_eq!(group.value.max, Some(1.0));
+        assert_eq!(
+            group.filters[0].id,
+            "pseudo.pseudo_number_of_empty_prefix_mods"
+        );
+    }
+
+    #[test]
+    fn a_slot_the_data_has_no_pseudo_for_sends_nothing_rather_than_a_bad_filter() {
+        use crate::adapter::data_adapter::NoData;
+
+        let item = rare(vec![modifier(
+            ModifierType::Explicit,
+            Some(Generation::Prefix),
+        )]);
+
+        assert_eq!(empty_modifier_group(&item, &NoData), None);
     }
 }
