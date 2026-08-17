@@ -103,11 +103,59 @@ pub fn total_value(
     )
 }
 
+pub fn recalculated(
+    printed: f64,
+    stats: PropStats,
+    before: &[StatTotal],
+    after: &[StatTotal],
+    quality: f64,
+    use_quality: bool,
+) -> f64 {
+    let base = base_value(printed, stats, before, quality, use_quality);
+
+    total_value(base, stats, after, quality, use_quality)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::types::modifier::ModifierType;
     use crate::types::stat::StatRoll;
+
+    #[test]
+    fn socketing_a_rune_that_increases_armour_raises_the_armour() {
+        let before = vec![total("#% increased Armour", 20.0)];
+        let after = vec![
+            total("#% increased Armour", 20.0),
+            total("#% increased Armour", 10.0),
+        ];
+
+        let got = recalculated(120.0, ARMOUR, &before, &after, 0.0, true);
+
+        assert!(
+            got > 120.0,
+            "a rune granting more armour must raise what we search for, got {got}"
+        );
+    }
+
+    #[test]
+    fn socketing_nothing_leaves_the_property_where_it_was() {
+        let stats = vec![total("#% increased Armour", 20.0)];
+
+        let got = recalculated(120.0, ARMOUR, &stats, &stats, 0.0, true);
+
+        assert!((got - 120.0).abs() < 0.001, "got {got}");
+    }
+
+    #[test]
+    fn the_base_is_stripped_before_the_new_stats_are_applied() {
+        let before = vec![total("#% increased Armour", 100.0)];
+        let after = vec![total("#% increased Armour", 200.0)];
+
+        let got = recalculated(200.0, ARMOUR, &before, &after, 0.0, true);
+
+        assert!((got - 300.0).abs() < 0.001, "100 base at 200 percent, got {got}");
+    }
 
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9

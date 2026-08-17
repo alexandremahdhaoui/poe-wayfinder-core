@@ -169,6 +169,7 @@ pub struct MiscFilters {
     pub unidentified_tier: Range,
     pub veiled: Flag,
     pub fractured_item: Flag,
+    pub has_empty_modifier: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

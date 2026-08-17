@@ -471,18 +471,36 @@ fn equipment_rows(check: &PriceCheck) -> Vec<(NumericKey, Range, Option<f64>)> {
     let e = &check.query.filters.equipment_filters;
     let weapon = check.item.weapon;
 
-    let quality = f64::from(check.item.quality.unwrap_or(0));
     let mut armour = check.item.armour;
 
-    if quality != 20.0 {
-        use crate::controller::calc::preview::{rescale_armour, ArmourKind};
+    {
+        use crate::controller::aggregate::sum_stats_by_type;
+        use crate::controller::filter::item_property::{at_trade_quality, Scaling};
 
-        for kind in [
-            ArmourKind::Armour,
-            ArmourKind::Evasion,
-            ArmourKind::EnergyShield,
+        let totals = sum_stats_by_type(&check.item.modifiers);
+        let scaling = Scaling {
+            quality: f64::from(check.item.quality.unwrap_or(0)),
+            modifiable: check.item.is_modifiable(),
+            totals: &totals,
+        };
+
+        for (field, stats) in [
+            (
+                &mut armour.ar,
+                crate::controller::calc::base::ARMOUR,
+            ),
+            (
+                &mut armour.ev,
+                crate::controller::calc::base::EVASION,
+            ),
+            (
+                &mut armour.es,
+                crate::controller::calc::base::ENERGY_SHIELD,
+            ),
         ] {
-            rescale_armour(&mut armour, kind, quality, 20.0);
+            if let Some(printed) = field.filter(|value| *value > 0.0) {
+                *field = Some(at_trade_quality(printed, stats, scaling));
+            }
         }
     }
 
@@ -1543,6 +1561,7 @@ mod tests {
         let mut c = one_stat();
         c.item.quality = Some(0);
         c.item.armour.ar = Some(100.0);
+        c.item.info.craftable = true;
 
         let row = build(&c)
             .numerics
@@ -1554,10 +1573,33 @@ mod tests {
     }
 
     #[test]
+    fn an_item_whose_quality_cannot_change_is_offered_as_printed() {
+        let mut c = one_stat();
+
+        c.item.quality = Some(0);
+        c.item.armour.ar = Some(100.0);
+        c.item.info.craftable = true;
+        c.item.is_corrupted = true;
+
+        let row = build(&c)
+            .numerics
+            .into_iter()
+            .find(|r| r.key == RowKey::Numeric(NumericKey::Armour))
+            .expect("an armour row");
+
+        assert_eq!(
+            row.roll,
+            Some(100.0),
+            "a corrupted item cannot be raised to twenty quality, so nobody lists it that way"
+        );
+    }
+
+    #[test]
     fn an_item_already_at_twenty_quality_is_left_alone() {
         let mut c = one_stat();
         c.item.quality = Some(20);
         c.item.armour.ar = Some(120.0);
+        c.item.info.craftable = true;
 
         let row = build(&c)
             .numerics

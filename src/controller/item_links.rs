@@ -86,6 +86,21 @@ pub fn similar_items(name: &str) -> Option<String> {
     }
 }
 
+pub fn same_priced_from_note(note: &str) -> Option<String> {
+    let mut words = note.split_whitespace();
+
+    let marker = words.next()?;
+
+    if marker != "~price" && marker != "~b/o" {
+        return None;
+    }
+
+    let amount: f64 = words.next()?.parse().ok()?;
+    let currency = words.next()?;
+
+    same_priced(amount, currency)
+}
+
 pub fn same_priced(amount: f64, currency: &str) -> Option<String> {
     let currency = currency.trim();
 
@@ -121,6 +136,29 @@ mod tests {
     use super::*;
 
     const ITEM: &str = "Item Class: Rings\nRarity: Rare\nDoom Loop\nSapphire Ring\n";
+
+    #[test]
+    fn a_price_note_becomes_a_stash_search() {
+        assert_eq!(
+            same_priced_from_note("~price 5 divine"),
+            Some("\"5 divine\"".to_string())
+        );
+    }
+
+    #[test]
+    fn a_buyout_note_is_read_too() {
+        assert_eq!(
+            same_priced_from_note("~b/o 2.5 exalted"),
+            Some("\"2.50 exalted\"".to_string())
+        );
+    }
+
+    #[test]
+    fn a_note_that_is_not_a_price_is_refused() {
+        assert_eq!(same_priced_from_note("for my own use"), None);
+        assert_eq!(same_priced_from_note("~price"), None);
+        assert_eq!(same_priced_from_note("~price lots divine"), None);
+    }
 
     #[test]
     fn each_game_has_its_own_wiki() {

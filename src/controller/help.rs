@@ -40,6 +40,26 @@ pub fn widest_key(entries: &[Entry]) -> usize {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_missing_client_log_says_what_it_is_for_and_how_to_point_at_it() {
+        for poe2 in [true, false] {
+            let missing = client_log_is_missing(poe2);
+
+            assert!(missing.what.contains("Client.txt"));
+            assert!(missing.why.contains("league"), "say what it buys");
+            assert!(missing.how.contains("--client-log-path"), "say how");
+        }
+    }
+
+    #[test]
+    fn each_game_is_told_where_its_own_log_lives() {
+        let poe2 = client_log_is_missing(true);
+        let poe1 = client_log_is_missing(false);
+
+        assert!(poe2.how.contains("Path of Exile 2"));
+        assert_ne!(poe1.how, poe2.how);
+    }
+
     fn some() -> Vec<(String, String)> {
         vec![
             ("Ctrl+D".into(), "price check".into()),
@@ -99,5 +119,25 @@ mod tests {
     fn nothing_bound_is_an_empty_list_rather_than_a_panic() {
         assert!(entries(&[]).is_empty());
         assert_eq!(widest_key(&[]), 0);
+    }
+}
+
+pub struct Missing {
+    pub what: &'static str,
+    pub why: &'static str,
+    pub how: &'static str,
+}
+
+pub fn client_log_is_missing(game_is_poe2: bool) -> Missing {
+    Missing {
+        what: "No Client.txt found.",
+        why: "This reads the game's own log, which is how it knows your level, \
+              the area you entered and the league a trade whisper came from.",
+        how: match game_is_poe2 {
+            true => "Point --client-log-path at it. It is usually under \
+                     Path of Exile 2\\logs\\Client.txt in your Steam library.",
+            false => "Point --client-log-path at it. It is usually under \
+                      Path of Exile\\logs\\Client.txt in your Steam library.",
+        },
     }
 }

@@ -8,6 +8,8 @@ pub struct Quote {
     pub currency: String,
     pub account: String,
     pub online: bool,
+    pub away: bool,
+    pub details: crate::controller::listing::DisplayItem,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -153,6 +155,8 @@ mod tests {
             currency: currency.to_string(),
             account: "seller".to_string(),
             online: true,
+            away: false,
+            details: crate::controller::listing::DisplayItem::default(),
         }
     }
 

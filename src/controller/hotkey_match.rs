@@ -66,9 +66,6 @@ impl Watcher {
         }
     }
 
-    pub fn watching(&self) -> usize {
-        self.bindings.len()
-    }
 
     pub fn react(&mut self, event: KeyEvent) -> Reaction {
         if is_modifier_code(event.code) {
@@ -251,12 +248,16 @@ mod watcher_tests {
 
     #[test]
     fn a_binding_on_a_modifier_is_refused_rather_than_eating_every_ctrl() {
-        let w = Watcher::new(vec![Binding {
+        let mut w = Watcher::new(vec![Binding {
             code: CTRL_CODE,
             modifiers: Modifiers::default(),
         }]);
 
-        assert_eq!(w.watching(), 0);
+        assert_eq!(
+            w.react(press(CTRL_CODE, mods(true, false, false))),
+            Reaction::Ignore,
+            "a bare modifier binding would swallow every Ctrl the game needs"
+        );
     }
 
     #[test]

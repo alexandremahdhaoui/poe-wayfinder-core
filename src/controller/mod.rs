@@ -1,5 +1,6 @@
 pub mod aggregate;
 pub mod background;
+pub mod bind_capture;
 pub mod bulk;
 pub mod calc;
 pub mod chat;

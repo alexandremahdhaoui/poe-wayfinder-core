@@ -10,11 +10,16 @@ use crate::types::modifier::ModifierType;
 use crate::types::query::{Range, StatFilter, StatGroup, StatGroupKind};
 use crate::types::stat::{StatBetter, StatRoll};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StatFilterOptions {
     pub roll_tolerance: f64,
     pub enable_all: bool,
     pub facts: ItemFacts,
+    pub hide_augments: bool,
+    pub cluster_jewel_rules: bool,
+    pub hide_flask_enchants: bool,
+    pub hide_anointment: bool,
+    pub valuable_rooms: Vec<String>,
 }
 
 impl Default for StatFilterOptions {
@@ -22,6 +27,11 @@ impl Default for StatFilterOptions {
         Self {
             roll_tolerance: 0.1,
             enable_all: false,
+            hide_augments: false,
+            cluster_jewel_rules: false,
+            hide_flask_enchants: false,
+            hide_anointment: false,
+            valuable_rooms: Vec::new(),
             facts: ItemFacts {
                 is_unique: false,
                 is_modifiable: true,
@@ -34,7 +44,7 @@ impl Default for StatFilterOptions {
 pub fn build_stat_group(
     modifiers: &[ParsedModifier],
     data: &dyn StatLookup,
-    options: StatFilterOptions,
+    options: &StatFilterOptions,
 ) -> Option<StatGroup> {
     build_stat_group_for(modifiers, None, data, options)
 }
@@ -43,7 +53,7 @@ pub fn build_stat_group_for(
     modifiers: &[ParsedModifier],
     item: Option<&crate::types::item::ParsedItem>,
     data: &dyn StatLookup,
-    options: StatFilterOptions,
+    options: &StatFilterOptions,
 ) -> Option<StatGroup> {
     build_stat_filters(modifiers, item, data, options).and
 }
@@ -88,16 +98,23 @@ pub fn build_stat_filters(
     modifiers: &[ParsedModifier],
     item: Option<&crate::types::item::ParsedItem>,
     data: &dyn StatLookup,
-    options: StatFilterOptions,
+    options: &StatFilterOptions,
 ) -> StatFilters {
     let mut counts = Vec::new();
     let mut filters = Vec::new();
     let mut sources: Vec<FilterSource> = Vec::new();
+    let totals = sum_stats_by_type(modifiers);
 
     if let Some(item) = item {
-        for property in armour_filters(item.armour)
+        let scaling = crate::controller::filter::item_property::Scaling {
+            quality: f64::from(item.quality.unwrap_or(0)),
+            modifiable: item.is_modifiable(),
+            totals: &totals,
+        };
+
+        for property in armour_filters(item.armour, scaling)
             .into_iter()
-            .chain(weapon_filters(item.category, item.weapon))
+            .chain(weapon_filters(item.category, item.weapon, scaling))
         {
             let roll = crate::types::stat::StatRoll {
                 value: property.value,
@@ -139,8 +156,6 @@ pub fn build_stat_filters(
         ));
     }
 
-    let totals = sum_stats_by_type(modifiers);
-
     for pseudo in pseudo_totals(&totals) {
         let Some(hit) = data.stat_by_matcher(pseudo.reference) else {
             continue;
@@ -176,7 +191,23 @@ pub fn build_stat_filters(
 
     let mut explicit_matches: Vec<(String, StatFilter, Option<StatRoll>)> = Vec::new();
 
-    for total in totals {
+    let mut wanted: Vec<String> = totals.iter().map(|t| t.reference.clone()).collect();
+
+    if let Some(item) = item {
+        use crate::controller::filter::item_property::{
+            armour_stats, remove_used_stats, weapon_stats,
+        };
+
+        if !item.armour.is_empty() {
+            remove_used_stats(&mut wanted, &armour_stats());
+        }
+
+        if !item.weapon.is_empty() {
+            remove_used_stats(&mut wanted, &weapon_stats());
+        }
+    }
+
+    for total in totals.iter().filter(|t| wanted.contains(&t.reference)) {
         let Some(matched) = matched_text(modifiers, &total.reference) else {
             continue;
         };
@@ -303,7 +334,7 @@ fn missing_fractured_filters(
 fn influence_filters(
     influences: &[crate::types::item::Influence],
     data: &dyn StatLookup,
-    options: StatFilterOptions,
+    options: &StatFilterOptions,
     sources: &mut Vec<FilterSource>,
 ) -> Vec<StatFilter> {
     let mut out = Vec::new();
@@ -384,7 +415,7 @@ fn build_one(
     roll: Option<StatRoll>,
     kind: ModifierType,
     data: &dyn StatLookup,
-    options: StatFilterOptions,
+    options: &StatFilterOptions,
 ) -> Option<BuiltFilter> {
     let hit = data.stat_by_matcher(matched)?;
 
@@ -405,8 +436,11 @@ fn build_one(
 
     let mut filter = StatFilter::range(id, Range::default());
 
-    filter.disabled =
-        !options.enable_all && !should_enable(roll, hit.stat.better, hidden, GOOD_ROLL_THRESHOLD);
+    let hidden_augment =
+        options.hide_augments && crate::controller::filter::slots::is_hidden_by_default(kind);
+
+    filter.disabled = !options.enable_all
+        && (hidden_augment || !should_enable(roll, hit.stat.better, hidden, GOOD_ROLL_THRESHOLD));
 
     let Some(roll) = roll else {
         return Some(BuiltFilter { filter, alternates });
@@ -420,14 +454,75 @@ fn build_one(
 
     filter.range = bound_for(roll, hit.stat.better, hit.stat.trade.inverted, options);
 
+    apply_category_rules(&mut filter, &hit.stat.reference, options);
+
     Some(BuiltFilter { filter, alternates })
+}
+
+fn apply_category_rules(filter: &mut StatFilter, reference: &str, options: &StatFilterOptions) {
+    use crate::controller::filter::slots::{
+        is_cluster_socket_stat, passive_bound, PassiveBound, ADDS_PASSIVES,
+    };
+
+    if options.hide_anointment && reference.starts_with("Allocates ") {
+        filter.hidden = true;
+        filter.disabled = true;
+
+        return;
+    }
+
+    if !options.valuable_rooms.is_empty() && reference.ends_with(" (Open)") {
+        let room = reference.trim_end_matches(" (Open)");
+
+        filter.disabled = !options
+            .valuable_rooms
+            .iter()
+            .any(|valuable| valuable == room);
+
+        return;
+    }
+
+    if options.hide_flask_enchants && filter.id.starts_with("enchant.") {
+        filter.hidden = true;
+        filter.disabled = true;
+
+        return;
+    }
+
+    if !options.cluster_jewel_rules {
+        return;
+    }
+
+    if is_cluster_socket_stat(reference) {
+        filter.hidden = true;
+        filter.disabled = true;
+
+        return;
+    }
+
+    if reference != ADDS_PASSIVES {
+        return;
+    }
+
+    let Some(count) = filter.range.min.map(|value| value as u32) else {
+        return;
+    };
+
+    filter.disabled = false;
+
+    match passive_bound(count) {
+        PassiveBound::UpTo(max) => filter.range.max = Some(f64::from(max)),
+        PassiveBound::Exact => filter.range.max = filter.range.min,
+        PassiveBound::AtLeast => filter.range.max = None,
+        PassiveBound::AtMost => filter.range.min = None,
+    }
 }
 
 fn bound_for(
     roll: StatRoll,
     better: StatBetter,
     inverted: bool,
-    options: StatFilterOptions,
+    options: &StatFilterOptions,
 ) -> Range {
     let value = if inverted { -roll.value } else { roll.value };
 
@@ -589,12 +684,240 @@ mod tests {
     }
 
     #[test]
+    fn an_armour_mod_is_not_asked_for_twice_once_as_a_stat_and_once_as_the_total() {
+        let mut item = crate::types::item::ParsedItem::default();
+
+        item.armour.ar = Some(1000.0);
+
+        let table = FakeStats {
+            stats: vec![stat_with(
+                "#% increased Armour",
+                StatBetter::PositiveRoll,
+                trade_with("explicit", "explicit.stat_armour_incr"),
+            )],
+        };
+
+        let got = build_stat_filters(
+            &[modifier(
+                ModifierType::Explicit,
+                "#% increased Armour",
+                roll(30.0),
+            )],
+            Some(&item),
+            &table,
+            &StatFilterOptions::default(),
+        );
+
+        let asked: Vec<String> = got
+            .and
+            .map(|group| group.filters.iter().map(|f| f.id.clone()).collect())
+            .unwrap_or_default();
+
+        assert!(
+            !asked.iter().any(|id| id == "explicit.stat_armour_incr"),
+            "the armour total already covers it, and asking for both matches nothing"
+        );
+    }
+
+    #[test]
+    fn a_stat_that_is_not_a_defence_survives_on_an_armour_item() {
+        let mut item = crate::types::item::ParsedItem::default();
+
+        item.armour.ar = Some(1000.0);
+
+        let got = build_stat_filters(
+            &[modifier(ModifierType::Explicit, "# to maximum Life", roll(80.0))],
+            Some(&item),
+            &life_table(),
+            &StatFilterOptions::default(),
+        );
+
+        let group = got.and.expect("a stat group");
+
+        assert!(
+            group
+                .filters
+                .iter()
+                .any(|f| f.id == "explicit.stat_3299347043"),
+            "life has nothing to do with armour and must still be asked for"
+        );
+    }
+
+    #[test]
+    fn a_cluster_jewel_with_four_passives_searches_four_to_five() {
+        let mut filter = StatFilter::range("explicit.stat_x", Range::at_least(4.0));
+
+        apply_category_rules(
+            &mut filter,
+            "Adds # Passive Skills",
+            &StatFilterOptions {
+                cluster_jewel_rules: true,
+                ..StatFilterOptions::default()
+            },
+        );
+
+        assert_eq!(filter.range.min, Some(4.0));
+        assert_eq!(filter.range.max, Some(5.0), "four is worth five");
+        assert!(!filter.disabled, "the passive count always matters");
+    }
+
+    #[test]
+    fn a_cluster_jewel_with_five_passives_searches_exactly_five() {
+        let mut filter = StatFilter::range("explicit.stat_x", Range::at_least(5.0));
+
+        apply_category_rules(
+            &mut filter,
+            "Adds # Passive Skills",
+            &StatFilterOptions {
+                cluster_jewel_rules: true,
+                ..StatFilterOptions::default()
+            },
+        );
+
+        assert_eq!(filter.range.max, Some(5.0));
+    }
+
+    #[test]
+    fn a_cluster_jewel_with_eight_passives_searches_at_most_eight() {
+        let mut filter = StatFilter::range("explicit.stat_x", Range::at_least(8.0));
+
+        apply_category_rules(
+            &mut filter,
+            "Adds # Passive Skills",
+            &StatFilterOptions {
+                cluster_jewel_rules: true,
+                ..StatFilterOptions::default()
+            },
+        );
+
+        assert_eq!(filter.range.min, None, "eight is a bad roll, so at most");
+    }
+
+    #[test]
+    fn the_jewel_socket_count_is_hidden_because_it_never_varies() {
+        let mut filter = StatFilter::range("explicit.stat_x", Range::at_least(2.0));
+
+        apply_category_rules(
+            &mut filter,
+            "# Added Passive Skills are Jewel Sockets",
+            &StatFilterOptions {
+                cluster_jewel_rules: true,
+                ..StatFilterOptions::default()
+            },
+        );
+
+        assert!(filter.hidden & filter.disabled);
+    }
+
+    #[test]
+    fn a_flask_enchant_is_hidden_unless_the_flask_gains_no_charges() {
+        let mut filter = StatFilter::range("enchant.stat_x", Range::at_least(1.0));
+
+        apply_category_rules(
+            &mut filter,
+            "#% increased Flask Effect",
+            &StatFilterOptions {
+                hide_flask_enchants: true,
+                ..StatFilterOptions::default()
+            },
+        );
+
+        assert!(filter.hidden & filter.disabled);
+    }
+
+    #[test]
+    fn nothing_happens_to_a_filter_when_no_category_rule_applies() {
+        let mut filter = StatFilter::range("explicit.stat_x", Range::at_least(4.0));
+        let before = filter.clone();
+
+        apply_category_rules(
+            &mut filter,
+            "Adds # Passive Skills",
+            &StatFilterOptions::default(),
+        );
+
+        assert_eq!(filter, before);
+    }
+
+    #[test]
+    fn a_stat_a_rune_granted_on_a_unique_starts_switched_off() {
+        let table = FakeStats {
+            stats: vec![stat_with(
+                "# to maximum Life",
+                StatBetter::PositiveRoll,
+                trade_with("rune", "rune.stat_3299347043"),
+            )],
+        };
+
+        let options = StatFilterOptions {
+            hide_augments: true,
+            ..StatFilterOptions::default()
+        };
+
+        let got = build_stat_filters(
+            &[modifier(ModifierType::Augment, "# to maximum Life", roll(80.0))],
+            None,
+            &table,
+            &options,
+        );
+
+        let group = got.and.expect("a stat group");
+
+        assert!(
+            group.filters.iter().all(|f| f.disabled),
+            "on a unique, a rune's own stat must not narrow the search"
+        );
+    }
+
+    #[test]
+    fn a_stat_a_rune_granted_on_a_rare_is_left_as_it_is() {
+        let table = FakeStats {
+            stats: vec![stat_with(
+                "# to maximum Life",
+                StatBetter::PositiveRoll,
+                trade_with("rune", "rune.stat_3299347043"),
+            )],
+        };
+
+        let got = build_stat_filters(
+            &[modifier(ModifierType::Augment, "# to maximum Life", roll(80.0))],
+            None,
+            &table,
+            &StatFilterOptions::default(),
+        );
+
+        let group = got.and.expect("a stat group");
+
+        assert!(
+            group.filters.iter().any(|f| !f.disabled),
+            "upstream only hides augments on uniques, so a rare keeps its rune stat"
+        );
+    }
+
+    #[test]
+    fn a_stat_the_item_rolled_itself_is_not_hidden_by_that_rule() {
+        let got = build_stat_filters(
+            &[modifier(ModifierType::Explicit, "# to maximum Life", roll(80.0))],
+            None,
+            &life_table(),
+            &StatFilterOptions::default(),
+        );
+
+        let group = got.and.expect("a stat group");
+
+        assert!(
+            group.filters.iter().any(|f| !f.disabled),
+            "a good explicit roll still narrows the search"
+        );
+    }
+
+    #[test]
     fn a_stat_with_two_trade_ids_travels_as_a_count_group() {
         let got = build_stat_filters(
             &impale(),
             None,
             &two_id_table(),
-            StatFilterOptions::default(),
+            &StatFilterOptions::default(),
         );
 
         assert_eq!(got.counts.len(), 1);
@@ -607,7 +930,7 @@ mod tests {
             &impale(),
             None,
             &two_id_table(),
-            StatFilterOptions::default(),
+            &StatFilterOptions::default(),
         );
 
         assert_eq!(got.counts[0].value.min, Some(1.0));
@@ -619,7 +942,7 @@ mod tests {
             &impale(),
             None,
             &two_id_table(),
-            StatFilterOptions::default(),
+            &StatFilterOptions::default(),
         );
 
         let ids: Vec<&str> = got.counts[0]
@@ -637,7 +960,7 @@ mod tests {
             &impale(),
             None,
             &two_id_table(),
-            StatFilterOptions::default(),
+            &StatFilterOptions::default(),
         );
 
         let first = &got.counts[0].filters[0];
@@ -653,7 +976,7 @@ mod tests {
             &impale(),
             None,
             &two_id_table(),
-            StatFilterOptions::default(),
+            &StatFilterOptions::default(),
         );
 
         assert_eq!(got.and, None);
@@ -667,7 +990,7 @@ mod tests {
             roll(50.0),
         )];
 
-        let got = build_stat_filters(&mods, None, &life_table(), StatFilterOptions::default());
+        let got = build_stat_filters(&mods, None, &life_table(), &StatFilterOptions::default());
 
         assert!(got.counts.is_empty());
         assert_eq!(got.and.unwrap().filters.len(), 1);
@@ -681,7 +1004,7 @@ mod tests {
             &[],
             Some(&item),
             &influence_table(),
-            StatFilterOptions::default(),
+            &StatFilterOptions::default(),
         )
         .unwrap();
 
@@ -697,7 +1020,7 @@ mod tests {
             &[],
             Some(&item),
             &influence_table(),
-            StatFilterOptions::default(),
+            &StatFilterOptions::default(),
         )
         .unwrap();
 
@@ -715,7 +1038,7 @@ mod tests {
             &[],
             Some(&item),
             &influence_table(),
-            StatFilterOptions::default(),
+            &StatFilterOptions::default(),
         )
         .unwrap();
 
@@ -730,7 +1053,7 @@ mod tests {
             &[],
             Some(&item),
             &influence_table(),
-            StatFilterOptions::default(),
+            &StatFilterOptions::default(),
         );
 
         assert!(group.is_none(), "an empty group matches everything");
@@ -744,7 +1067,7 @@ mod tests {
             &[],
             Some(&item),
             &influence_table(),
-            StatFilterOptions::default(),
+            &StatFilterOptions::default(),
         );
 
         assert!(group.is_none());
@@ -793,7 +1116,7 @@ mod tests {
             &two_explicits(),
             Some(&item),
             &fracture_table(),
-            StatFilterOptions::default(),
+            &StatFilterOptions::default(),
         )
         .unwrap();
 
@@ -815,7 +1138,7 @@ mod tests {
             &two_explicits(),
             Some(&item),
             &fracture_table(),
-            StatFilterOptions::default(),
+            &StatFilterOptions::default(),
         )
         .unwrap();
 
@@ -837,7 +1160,7 @@ mod tests {
             &modifiers,
             Some(&item),
             &fracture_table(),
-            StatFilterOptions::default(),
+            &StatFilterOptions::default(),
         )
         .unwrap();
 
@@ -858,7 +1181,7 @@ mod tests {
             &two_explicits(),
             Some(&item),
             &fracture_table(),
-            StatFilterOptions::default(),
+            &StatFilterOptions::default(),
         )
         .unwrap();
 
@@ -896,7 +1219,7 @@ mod tests {
             )],
             Some(&item),
             &table,
-            StatFilterOptions::default(),
+            &StatFilterOptions::default(),
         )
         .unwrap();
 
@@ -911,7 +1234,7 @@ mod tests {
             roll(50.0),
         )];
 
-        let group = build_stat_group(&mods, &life_table(), StatFilterOptions::default()).unwrap();
+        let group = build_stat_group(&mods, &life_table(), &StatFilterOptions::default()).unwrap();
 
         assert_eq!(group.filters.len(), 1);
         assert_eq!(group.filters[0].id, "explicit.stat_3299347043");
@@ -928,7 +1251,7 @@ mod tests {
 
         let mods = vec![modifier(ModifierType::Explicit, "# to maximum Life", poor)];
 
-        let group = build_stat_group(&mods, &life_table(), StatFilterOptions::default()).unwrap();
+        let group = build_stat_group(&mods, &life_table(), &StatFilterOptions::default()).unwrap();
 
         assert!(group.filters[0].disabled);
     }
@@ -944,7 +1267,7 @@ mod tests {
 
         let mods = vec![modifier(ModifierType::Explicit, "# to maximum Life", good)];
 
-        let group = build_stat_group(&mods, &life_table(), StatFilterOptions::default()).unwrap();
+        let group = build_stat_group(&mods, &life_table(), &StatFilterOptions::default()).unwrap();
 
         assert!(!group.filters[0].disabled);
     }
@@ -966,7 +1289,7 @@ mod tests {
             roll(50.0),
         )];
 
-        assert!(build_stat_group(&mods, &life_table(), options).is_none());
+        assert!(build_stat_group(&mods, &life_table(), &options).is_none());
     }
 
     #[test]
@@ -981,7 +1304,7 @@ mod tests {
             roll(50.0),
         )];
 
-        let group = build_stat_group(&mods, &life_table(), options).unwrap();
+        let group = build_stat_group(&mods, &life_table(), &options).unwrap();
 
         assert!(!group.filters[0].disabled);
     }
@@ -994,7 +1317,7 @@ mod tests {
             roll(50.0),
         )];
 
-        let group = build_stat_group(&mods, &life_table(), StatFilterOptions::default()).unwrap();
+        let group = build_stat_group(&mods, &life_table(), &StatFilterOptions::default()).unwrap();
 
         assert_eq!(group.filters[0].range.min, Some(45.0));
         assert_eq!(group.filters[0].range.max, None);
@@ -1015,7 +1338,7 @@ mod tests {
             roll(100.0),
         )];
 
-        let group = build_stat_group(&mods, &table, StatFilterOptions::default()).unwrap();
+        let group = build_stat_group(&mods, &table, &StatFilterOptions::default()).unwrap();
 
         assert_eq!(group.filters[0].range.max, Some(110.0));
         assert_eq!(group.filters[0].range.min, None);
@@ -1036,7 +1359,7 @@ mod tests {
             roll(3.0),
         )];
 
-        let group = build_stat_group(&mods, &table, StatFilterOptions::default()).unwrap();
+        let group = build_stat_group(&mods, &table, &StatFilterOptions::default()).unwrap();
 
         assert!(group.filters[0].range.is_empty());
     }
@@ -1059,7 +1382,7 @@ mod tests {
             roll(20.0),
         )];
 
-        let group = build_stat_group(&mods, &table, StatFilterOptions::default()).unwrap();
+        let group = build_stat_group(&mods, &table, &StatFilterOptions::default()).unwrap();
 
         assert_eq!(group.filters[0].range.max, Some(-18.0));
         assert_eq!(group.filters[0].range.min, None);
@@ -1075,7 +1398,7 @@ mod tests {
         };
         let mods = vec![modifier(ModifierType::Explicit, "Allocates #", roll(42.0))];
 
-        let group = build_stat_group(&mods, &table, StatFilterOptions::default()).unwrap();
+        let group = build_stat_group(&mods, &table, &StatFilterOptions::default()).unwrap();
 
         assert_eq!(group.filters[0].option, Some(42.0));
         assert!(group.filters[0].range.is_empty());
@@ -1100,7 +1423,7 @@ mod tests {
             }),
         )];
 
-        let group = build_stat_group(&mods, &table, StatFilterOptions::default()).unwrap();
+        let group = build_stat_group(&mods, &table, &StatFilterOptions::default()).unwrap();
 
         assert_eq!(group.filters[0].option, Some(7.0));
     }
@@ -1116,7 +1439,7 @@ mod tests {
         };
         let mods = vec![modifier(ModifierType::Explicit, "Cannot be Frozen", None)];
 
-        let group = build_stat_group(&mods, &table, StatFilterOptions::default()).unwrap();
+        let group = build_stat_group(&mods, &table, &StatFilterOptions::default()).unwrap();
 
         assert!(group.filters[0].range.is_empty());
         assert_eq!(group.filters[0].option, None);
@@ -1144,7 +1467,7 @@ mod tests {
                 roll(50.0),
             )],
             &table,
-            StatFilterOptions::default(),
+            &StatFilterOptions::default(),
         )
         .unwrap();
         assert_eq!(explicit.filters[0].id, "explicit.stat_life");
@@ -1156,7 +1479,7 @@ mod tests {
                 roll(50.0),
             )],
             &table,
-            StatFilterOptions::default(),
+            &StatFilterOptions::default(),
         )
         .unwrap();
         assert_eq!(implicit.filters[0].id, "implicit.stat_life");
@@ -1179,7 +1502,7 @@ mod tests {
                 roll(50.0),
             )],
             &table,
-            StatFilterOptions::default(),
+            &StatFilterOptions::default(),
         )
         .unwrap();
 
@@ -1203,7 +1526,7 @@ mod tests {
                 roll(50.0),
             )],
             &table,
-            StatFilterOptions::default(),
+            &StatFilterOptions::default(),
         );
 
         assert!(got.is_none());
@@ -1218,7 +1541,7 @@ mod tests {
                 roll(50.0),
             )],
             &life_table(),
-            StatFilterOptions::default(),
+            &StatFilterOptions::default(),
         );
 
         assert!(got.is_none());
@@ -1235,12 +1558,12 @@ mod tests {
             }],
         }];
 
-        assert!(build_stat_group(&mods, &life_table(), StatFilterOptions::default()).is_none());
+        assert!(build_stat_group(&mods, &life_table(), &StatFilterOptions::default()).is_none());
     }
 
     #[test]
     fn an_item_with_no_modifiers_yields_no_group() {
-        assert!(build_stat_group(&[], &life_table(), StatFilterOptions::default()).is_none());
+        assert!(build_stat_group(&[], &life_table(), &StatFilterOptions::default()).is_none());
     }
 
     #[test]
@@ -1250,7 +1573,7 @@ mod tests {
             modifier(ModifierType::Crafted, "# to maximum Life", roll(15.0)),
         ];
 
-        let group = build_stat_group(&mods, &life_table(), StatFilterOptions::default()).unwrap();
+        let group = build_stat_group(&mods, &life_table(), &StatFilterOptions::default()).unwrap();
 
         assert_eq!(group.filters.len(), 1);
         assert_eq!(group.filters[0].range.min, Some(31.5));
@@ -1276,7 +1599,7 @@ mod tests {
             modifier(ModifierType::Implicit, "# to maximum Life", roll(20.0)),
         ];
 
-        let group = build_stat_group(&mods, &table, StatFilterOptions::default()).unwrap();
+        let group = build_stat_group(&mods, &table, &StatFilterOptions::default()).unwrap();
 
         assert_eq!(group.filters.len(), 2);
     }
@@ -1293,7 +1616,7 @@ mod tests {
             roll(50.0),
         )];
 
-        let group = build_stat_group(&mods, &life_table(), options).unwrap();
+        let group = build_stat_group(&mods, &life_table(), &options).unwrap();
 
         assert_eq!(group.filters[0].range.min, Some(50.0));
     }
@@ -1306,7 +1629,7 @@ mod tests {
             roll(-50.0),
         )];
 
-        let group = build_stat_group(&mods, &life_table(), StatFilterOptions::default()).unwrap();
+        let group = build_stat_group(&mods, &life_table(), &StatFilterOptions::default()).unwrap();
 
         assert_eq!(group.filters[0].range.min, Some(-55.0));
     }

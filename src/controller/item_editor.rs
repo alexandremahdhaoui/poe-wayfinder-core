@@ -132,6 +132,72 @@ fn rank(reference: &str) -> u8 {
     3
 }
 
+fn recalculate_properties(
+    item: &ParsedItem,
+    augment: &Augment,
+    category: ItemCategory,
+    sockets: u32,
+    query: &mut TradeQuery,
+) {
+    use crate::controller::aggregate::sum_stats_by_type;
+    use crate::controller::calc::base::{recalculated, ARMOUR, ENERGY_SHIELD, EVASION};
+    use crate::controller::filter::augments::effect_for_category;
+
+    let Some(effect) = effect_for_category(augment, category) else {
+        return;
+    };
+
+    let before = sum_stats_by_type(&item.modifiers);
+    let granted = crate::controller::aggregate::StatTotal {
+        reference: effect.reference.clone(),
+        kind: crate::types::modifier::ModifierType::Augment,
+        roll: Some(crate::types::stat::StatRoll {
+            value: effect.value * f64::from(sockets),
+            min: effect.value * f64::from(sockets),
+            max: effect.value * f64::from(sockets),
+            ..crate::types::stat::StatRoll::default()
+        }),
+        sources: 1,
+    };
+
+    let mut after = before.clone();
+
+    after.push(granted);
+
+    let quality = f64::from(item.quality.unwrap_or(0));
+    let modifiable = item.is_modifiable();
+
+    let equipment = &mut query.filters.equipment_filters;
+
+    for (printed, stats, range) in [
+        (item.armour.ar, ARMOUR, &mut equipment.ar),
+        (item.armour.ev, EVASION, &mut equipment.ev),
+        (item.armour.es, ENERGY_SHIELD, &mut equipment.es),
+    ] {
+        let Some(printed) = printed.filter(|value| *value > 0.0) else {
+            continue;
+        };
+
+        if range.min.is_none() {
+            continue;
+        }
+
+        let fresh = recalculated(printed, stats, &before, &after, quality, modifiable);
+
+        range.min = Some(
+            crate::controller::filter::item_property::at_trade_quality(
+                fresh,
+                stats,
+                crate::controller::filter::item_property::Scaling {
+                    quality,
+                    modifiable,
+                    totals: &after,
+                },
+            ),
+        );
+    }
+}
+
 pub fn empty_sockets(item: &ParsedItem) -> u32 {
     item.augment_sockets.map(|s| s.empty).unwrap_or(0)
 }
@@ -180,6 +246,8 @@ impl ItemEditor {
 
         self.edit.apply(group, replacement);
         self.chosen = Some(reference_name.to_string());
+
+        recalculate_properties(item, augment, category, sockets, query);
 
         true
     }
@@ -320,6 +388,66 @@ mod tests {
 
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].name, "Body Rune");
+    }
+
+    #[test]
+    fn socketing_an_armour_rune_raises_the_armour_the_search_asks_for() {
+        let mut query = TradeQuery::default();
+
+        query.filters.equipment_filters.ar = Range::at_least(1000.0);
+        query.stats.push(StatGroup::all(Vec::new()));
+
+        let mut item = armour();
+
+        item.armour.ar = Some(1000.0);
+        item.info.craftable = true;
+
+        let mut editor = ItemEditor::default();
+
+        assert!(editor.choose(
+            "rune",
+            &[rune("rune", "#% increased Armour", 10.0)],
+            &item,
+            &mut query
+        ));
+
+        let asked = query
+            .filters
+            .equipment_filters
+            .ar
+            .min
+            .expect("an armour floor");
+
+        assert!(
+            asked > 1000.0,
+            "a rune granting increased armour must raise what we search for, got {asked}"
+        );
+    }
+
+    #[test]
+    fn socketing_a_rune_leaves_a_property_nobody_filtered_alone() {
+        let mut query = TradeQuery::default();
+
+        query.stats.push(StatGroup::all(Vec::new()));
+
+        let mut item = armour();
+
+        item.armour.ar = Some(1000.0);
+        item.info.craftable = true;
+
+        let mut editor = ItemEditor::default();
+
+        editor.choose(
+            "rune",
+            &[rune("rune", "#% increased Armour", 10.0)],
+            &item,
+            &mut query,
+        );
+
+        assert_eq!(
+            query.filters.equipment_filters.ar.min, None,
+            "a filter the user never turned on must stay off"
+        );
     }
 
     #[test]

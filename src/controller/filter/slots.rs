@@ -87,6 +87,16 @@ pub enum EmptySlot {
     Either,
 }
 
+impl EmptySlot {
+    pub fn trade_option(self) -> f64 {
+        match self {
+            EmptySlot::Either => 0.0,
+            EmptySlot::Prefix => 1.0,
+            EmptySlot::Suffix => 2.0,
+        }
+    }
+}
+
 pub fn empty_slot(item: &ParsedItem) -> Option<EmptySlot> {
     if !item.is_modifiable() || item.category == Some(ItemCategory::Map) {
         return None;
@@ -163,6 +173,10 @@ pub fn passive_bound(count: u32) -> PassiveBound {
         _ => PassiveBound::AtMost,
     }
 }
+
+pub const ADDS_PASSIVES: &str = "Adds # Passive Skills";
+
+pub const ENKINDLING: &str = "Gains no Charges during Flask Effect";
 
 pub fn is_cluster_socket_stat(reference: &str) -> bool {
     reference == "# Added Passive Skills are Jewel Sockets"

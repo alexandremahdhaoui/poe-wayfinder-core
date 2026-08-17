@@ -6,10 +6,6 @@ pub struct Rect {
     pub height: i32,
 }
 
-pub fn point_in_rect(x: i32, y: i32, rect: Rect) -> bool {
-    x > rect.x && x < rect.x + rect.width && y > rect.y && y < rect.y + rect.height
-}
-
 pub const ITEM_FIRST_LINE: &str = "Item Class: ";
 
 pub const FOREIGN_FIRST_LINES: &[(&str, &str)] = &[
@@ -86,7 +82,7 @@ pub struct KeyStroke {
     pub down: bool,
 }
 
-pub fn copy_key_sequence() -> Vec<KeyStroke> {
+pub fn copy_key_sequence(also_hold: &[String]) -> Vec<KeyStroke> {
     let press = |key: &str| KeyStroke {
         key: key.to_string(),
         down: true,
@@ -97,85 +93,27 @@ pub fn copy_key_sequence() -> Vec<KeyStroke> {
         down: false,
     };
 
-    vec![press("Ctrl"), press("C"), release("C"), release("Ctrl")]
-}
+    let mut out = vec![press("Ctrl")];
 
-const STASH_TOP: f64 = 154.0 / 1600.0;
-
-const STASH_BOTTOM: f64 = 1192.0 / 1600.0;
-
-pub fn is_stash_area(x: i32, y: i32, window: Rect, sidebar_width: i32) -> bool {
-    if x > window.x + sidebar_width {
-        return false;
+    for key in also_hold {
+        out.push(press(key));
     }
 
-    let height = f64::from(window.height);
-    let top = f64::from(window.y) + height * STASH_TOP;
-    let bottom = f64::from(window.y) + height * STASH_BOTTOM;
+    out.push(press("C"));
+    out.push(release("C"));
 
-    let y = f64::from(y);
+    for key in also_hold.iter().rev() {
+        out.push(release(key));
+    }
 
-    y > top && y < bottom
+    out.push(release("Ctrl"));
+
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn rect() -> Rect {
-        Rect {
-            x: 100,
-            y: 100,
-            width: 200,
-            height: 200,
-        }
-    }
-
-    #[test]
-    fn a_point_inside_is_inside() {
-        assert!(point_in_rect(150, 150, rect()));
-    }
-
-    #[test]
-    fn a_point_outside_is_outside() {
-        assert!(!point_in_rect(50, 150, rect()));
-        assert!(!point_in_rect(150, 50, rect()));
-        assert!(!point_in_rect(350, 150, rect()));
-        assert!(!point_in_rect(150, 350, rect()));
-    }
-
-    #[test]
-    fn a_point_on_the_border_belongs_to_the_game() {
-        assert!(!point_in_rect(100, 150, rect()));
-        assert!(!point_in_rect(300, 150, rect()));
-        assert!(!point_in_rect(150, 100, rect()));
-        assert!(!point_in_rect(150, 300, rect()));
-    }
-
-    #[test]
-    fn a_rectangle_with_no_area_contains_nothing() {
-        let empty = Rect {
-            x: 100,
-            y: 100,
-            width: 0,
-            height: 0,
-        };
-
-        assert!(!point_in_rect(100, 100, empty));
-    }
-
-    #[test]
-    fn a_negative_coordinate_works() {
-        let left = Rect {
-            x: -500,
-            y: 0,
-            width: 200,
-            height: 200,
-        };
-
-        assert!(point_in_rect(-400, 100, left));
-        assert!(!point_in_rect(-600, 100, left));
-    }
 
     #[test]
     fn english_item_text_is_recognised() {
@@ -286,67 +224,9 @@ mod tests {
         }
     }
 
-    fn window() -> Rect {
-        Rect {
-            x: 0,
-            y: 0,
-            width: 2560,
-            height: 1600,
-        }
-    }
-
-    #[test]
-    fn the_middle_of_the_stash_panel_is_the_stash() {
-        assert!(is_stash_area(100, 800, window(), 600));
-    }
-
-    #[test]
-    fn above_and_below_the_panel_is_not_the_stash() {
-        assert!(!is_stash_area(100, 100, window(), 600));
-        assert!(!is_stash_area(100, 1500, window(), 600));
-    }
-
-    #[test]
-    fn past_the_sidebar_is_the_game_world() {
-        assert!(!is_stash_area(1000, 800, window(), 600));
-    }
-
-    #[test]
-    fn the_bounds_scale_with_the_window() {
-        let small = Rect {
-            x: 0,
-            y: 0,
-            width: 1280,
-            height: 800,
-        };
-
-        assert!(is_stash_area(100, 400, small, 300));
-        assert!(!is_stash_area(100, 50, small, 300));
-    }
-
-    #[test]
-    fn an_offset_window_moves_the_panel_with_it() {
-        let offset = Rect {
-            x: 500,
-            y: 300,
-            width: 2560,
-            height: 1600,
-        };
-
-        assert!(is_stash_area(600, 1100, offset, 600));
-        assert!(!is_stash_area(600, 350, offset, 600));
-    }
-
-    #[test]
-    fn the_panel_top_is_above_its_bottom() {
-        let mid = f64::from(window().height) * (STASH_TOP + STASH_BOTTOM) / 2.0;
-
-        assert!(is_stash_area(100, mid as i32, window(), 600));
-    }
-
     #[test]
     fn the_copy_sequence_is_control_and_c() {
-        let got = copy_key_sequence();
+        let got = copy_key_sequence(&nothing_extra());
 
         assert_eq!(got.len(), 4);
         assert_eq!(got[0].key, "Ctrl");
@@ -355,7 +235,7 @@ mod tests {
 
     #[test]
     fn the_letter_is_released_before_the_modifier() {
-        let got = copy_key_sequence();
+        let got = copy_key_sequence(&holding_alt());
 
         let c_up = got
             .iter()
@@ -371,7 +251,7 @@ mod tests {
 
     #[test]
     fn the_modifier_goes_down_before_the_letter() {
-        let got = copy_key_sequence();
+        let got = copy_key_sequence(&holding_alt());
 
         let ctrl_down = got
             .iter()
@@ -387,7 +267,7 @@ mod tests {
 
     #[test]
     fn every_press_has_a_release() {
-        let got = copy_key_sequence();
+        let got = copy_key_sequence(&holding_alt());
 
         for stroke in got.iter().filter(|s| s.down) {
             assert!(
@@ -398,9 +278,17 @@ mod tests {
         }
     }
 
+    fn nothing_extra() -> Vec<String> {
+        Vec::new()
+    }
+
+    fn holding_alt() -> Vec<String> {
+        vec!["Alt".to_string()]
+    }
+
     #[test]
     fn no_key_is_released_without_being_pressed() {
-        let got = copy_key_sequence();
+        let got = copy_key_sequence(&holding_alt());
 
         for stroke in got.iter().filter(|s| !s.down) {
             assert!(
@@ -413,7 +301,7 @@ mod tests {
 
     #[test]
     fn the_sequence_nests_rather_than_overlapping() {
-        let got = copy_key_sequence();
+        let got = copy_key_sequence(&holding_alt());
 
         let mut held: Vec<&str> = Vec::new();
 
@@ -434,7 +322,30 @@ mod tests {
     }
 
     #[test]
-    fn the_show_mods_key_is_not_held_during_a_copy() {
-        assert!(!copy_key_sequence().iter().any(|s| s.key == "Alt"));
+    fn the_show_mods_key_is_held_during_a_copy_or_the_roll_ranges_are_lost() {
+        let got = copy_key_sequence(&holding_alt());
+
+        assert!(got.iter().any(|s| s.key == "Alt" && s.down));
+    }
+
+    #[test]
+    fn the_show_mods_key_is_held_before_the_copy_and_let_go_after_it() {
+        let got = copy_key_sequence(&holding_alt());
+        let at = |key: &str, down: bool| {
+            got.iter()
+                .position(|s| s.key == key && s.down == down)
+                .expect("the stroke")
+        };
+
+        assert!(at("Alt", true) < at("C", true), "held too late to matter");
+        assert!(at("C", false) < at("Alt", false), "let go too early");
+    }
+
+    #[test]
+    fn a_game_that_needs_no_extra_key_still_gets_a_plain_copy() {
+        let got = copy_key_sequence(&nothing_extra());
+        let keys: Vec<&str> = got.iter().map(|s| s.key.as_str()).collect();
+
+        assert_eq!(keys, ["Ctrl", "C", "C", "Ctrl"]);
     }
 }

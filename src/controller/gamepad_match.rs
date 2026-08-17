@@ -169,9 +169,6 @@ impl Watcher {
         }
     }
 
-    pub fn watching(&self) -> usize {
-        self.bindings.len()
-    }
 
     pub fn react(&mut self, state: u16) -> Reaction {
         let Some(binding) = best_match(&self.bindings, state) else {
@@ -481,9 +478,10 @@ mod watcher_tests {
 
     #[test]
     fn an_empty_chord_is_refused_rather_than_firing_on_every_poll() {
-        let w = Watcher::new(vec![Chord { mask: 0 }]);
+        let mut w = Watcher::new(vec![Chord { mask: 0 }]);
 
-        assert_eq!(w.watching(), 0);
+        assert_eq!(w.react(0), Reaction::Ignore);
+        assert_eq!(w.react(A), Reaction::Ignore, "an empty chord fires never");
     }
 
     #[test]
@@ -491,7 +489,6 @@ mod watcher_tests {
         let mut w = Watcher::new(Vec::new());
 
         assert_eq!(w.react(CHECK), Reaction::Ignore);
-        assert_eq!(w.watching(), 0);
     }
 
     #[test]

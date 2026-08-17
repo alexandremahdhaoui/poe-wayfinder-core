@@ -1,3 +1,6 @@
+use crate::controller::aggregate::StatTotal;
+use crate::controller::calc::base::{contributions, PropStats};
+use crate::controller::calc::quality::prop_at_20_quality;
 use crate::types::category::ItemCategory;
 use crate::types::item::{ArmourStats, MapStats, WeaponStats};
 
@@ -66,7 +69,45 @@ pub fn primary_defence(armour: ArmourStats) -> Option<(&'static str, f64)> {
     best
 }
 
-pub fn armour_filters(armour: ArmourStats) -> Vec<PropertyFilter> {
+#[derive(Debug, Clone, Copy)]
+pub struct Scaling<'a> {
+    pub quality: f64,
+    pub modifiable: bool,
+    pub totals: &'a [StatTotal],
+}
+
+impl Scaling<'_> {
+    pub fn printed() -> Self {
+        Self {
+            quality: 0.0,
+            modifiable: false,
+            totals: &[],
+        }
+    }
+}
+
+pub fn at_trade_quality(printed: f64, stats: PropStats, scaling: Scaling) -> f64 {
+    prop_at_20_quality(
+        printed,
+        contributions(stats, scaling.totals),
+        scaling.quality,
+        scaling.modifiable,
+    )
+    .value
+}
+
+fn defence_at_trade_quality(id: &str, printed: f64, scaling: Scaling) -> f64 {
+    let stats = match id {
+        "item.armour" => crate::controller::calc::base::ARMOUR,
+        "item.evasion_rating" => crate::controller::calc::base::EVASION,
+        "item.energy_shield" => crate::controller::calc::base::ENERGY_SHIELD,
+        _ => return printed,
+    };
+
+    at_trade_quality(printed, stats, scaling)
+}
+
+pub fn armour_filters(armour: ArmourStats, scaling: Scaling) -> Vec<PropertyFilter> {
     let Some((id, value)) = primary_defence(armour) else {
         return Vec::new();
     };
@@ -74,7 +115,7 @@ pub fn armour_filters(armour: ArmourStats) -> Vec<PropertyFilter> {
     if is_single_defence_armour(armour) {
         return vec![PropertyFilter {
             id,
-            value,
+            value: defence_at_trade_quality(id, value, scaling),
             enabled: true,
         }];
     }
@@ -88,14 +129,18 @@ pub fn armour_filters(armour: ArmourStats) -> Vec<PropertyFilter> {
     .filter_map(|(candidate, v)| {
         v.filter(|v| *v > 0.0).map(|v| PropertyFilter {
             id: candidate,
-            value: v,
+            value: defence_at_trade_quality(candidate, v, scaling),
             enabled: candidate == id,
         })
     })
     .collect()
 }
 
-pub fn weapon_filters(category: Option<ItemCategory>, weapon: WeaponStats) -> Vec<PropertyFilter> {
+pub fn weapon_filters(
+    category: Option<ItemCategory>,
+    weapon: WeaponStats,
+    scaling: Scaling,
+) -> Vec<PropertyFilter> {
     let Some(aps) = weapon.attack_speed else {
         return Vec::new();
     };
@@ -114,7 +159,11 @@ pub fn weapon_filters(category: Option<ItemCategory>, weapon: WeaponStats) -> Ve
             .unwrap_or_default();
     }
 
-    let physical = weapon.physical.unwrap_or(0.0) * aps;
+    let physical = at_trade_quality(
+        weapon.physical.unwrap_or(0.0),
+        crate::controller::calc::base::PHYSICAL_DAMAGE,
+        scaling,
+    ) * aps;
     let elemental = weapon.elemental.unwrap_or(0.0) * aps;
     let total = physical + elemental;
 
@@ -180,6 +229,34 @@ pub fn base_percentile_filter(percentile: Option<f64>) -> Option<PropertyFilter>
         value,
         enabled: value >= 50.0,
     })
+}
+
+pub fn armour_stats() -> Vec<&'static str> {
+    use crate::controller::calc::base::{ARMOUR, ENERGY_SHIELD, EVASION};
+
+    let mut out = Vec::new();
+
+    for stats in [ARMOUR, EVASION, ENERGY_SHIELD] {
+        out.extend_from_slice(stats.flat);
+        out.extend_from_slice(stats.increased);
+    }
+
+    out.push("#% increased Block chance");
+    out
+}
+
+pub fn weapon_stats() -> Vec<&'static str> {
+    use crate::controller::calc::base::{ATTACK_SPEED, PHYSICAL_DAMAGE};
+
+    let mut out = Vec::new();
+
+    for stats in [PHYSICAL_DAMAGE, ATTACK_SPEED] {
+        out.extend_from_slice(stats.flat);
+        out.extend_from_slice(stats.increased);
+    }
+
+    out.push("#% to Critical Hit Chance");
+    out
 }
 
 pub fn remove_used_stats(stats: &mut Vec<String>, used: &[&str]) {
@@ -274,16 +351,69 @@ mod tests {
     #[test]
     fn an_item_with_no_defences_gets_no_filter() {
         assert!(primary_defence(armour(None, None, None)).is_none());
-        assert!(armour_filters(armour(None, None, None)).is_empty());
+        assert!(armour_filters(armour(None, None, None), Scaling::printed()).is_empty());
     }
 
     #[test]
     fn an_armour_piece_gets_one_enabled_filter() {
-        let got = armour_filters(armour(Some(800.0), None, Some(40.0)));
+        let got = armour_filters(armour(Some(800.0), None, Some(40.0)), Scaling::printed());
 
         assert_eq!(got.len(), 1);
         assert!(got[0].enabled);
         assert_eq!(got[0].value, 800.0);
+    }
+
+    fn no_increases() -> Vec<StatTotal> {
+        Vec::new()
+    }
+
+    #[test]
+    fn armour_is_searched_at_twenty_quality_because_that_is_how_it_is_listed() {
+        let totals = no_increases();
+        let at_ten = Scaling {
+            quality: 10.0,
+            modifiable: true,
+            totals: &totals,
+        };
+
+        let printed = armour_filters(armour(Some(1000.0), None, None), Scaling::printed());
+        let asked = armour_filters(armour(Some(1000.0), None, None), at_ten);
+
+        assert_eq!(printed[0].value, 1000.0, "the printed value is the printed value");
+        assert!(
+            asked[0].value > printed[0].value,
+            "a ten percent quality chest must be searched as if it were twenty: {} vs {}",
+            asked[0].value,
+            printed[0].value
+        );
+    }
+
+    #[test]
+    fn an_item_already_at_twenty_quality_is_searched_as_printed() {
+        let totals = no_increases();
+        let at_twenty = Scaling {
+            quality: 20.0,
+            modifiable: true,
+            totals: &totals,
+        };
+
+        let asked = armour_filters(armour(Some(1000.0), None, None), at_twenty);
+
+        assert!((asked[0].value - 1000.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn an_item_quality_cannot_change_is_left_at_its_printed_value() {
+        let totals = no_increases();
+        let unique = Scaling {
+            quality: 0.0,
+            modifiable: false,
+            totals: &totals,
+        };
+
+        let asked = armour_filters(armour(Some(1000.0), None, None), unique);
+
+        assert!((asked[0].value - 1000.0).abs() < 0.001);
     }
 
     #[test]
@@ -291,6 +421,7 @@ mod tests {
         let got = weapon_filters(
             Some(ItemCategory::Bow),
             weapon(Some(100.0), None, Some(1.5)),
+        Scaling::printed(),
         );
 
         let pdps = got.iter().find(|f| f.id == "item.physical_dps").unwrap();
@@ -302,7 +433,7 @@ mod tests {
     #[test]
     fn a_weapon_with_no_attack_speed_gets_no_filters() {
         assert!(
-            weapon_filters(Some(ItemCategory::Bow), weapon(Some(100.0), None, None)).is_empty()
+            weapon_filters(Some(ItemCategory::Bow), weapon(Some(100.0), None, None), Scaling::printed()).is_empty()
         );
     }
 
@@ -316,6 +447,7 @@ mod tests {
                 spirit: None,
                 ..WeaponStats::default()
             },
+        Scaling::printed(),
         );
 
         assert!(got.is_empty());
@@ -331,6 +463,7 @@ mod tests {
                 physical: Some(50.0),
                 ..WeaponStats::default()
             },
+        Scaling::printed(),
         );
 
         assert_eq!(got.len(), 1);
@@ -343,6 +476,7 @@ mod tests {
         let got = weapon_filters(
             Some(ItemCategory::TwoHandedAxe),
             weapon(Some(200.0), Some(20.0), Some(1.2)),
+        Scaling::printed(),
         );
 
         let elemental = got.iter().find(|f| f.id == "item.elemental_dps").unwrap();
@@ -352,7 +486,7 @@ mod tests {
 
     #[test]
     fn a_weapon_with_no_damage_at_all_gets_no_filters() {
-        assert!(weapon_filters(Some(ItemCategory::Bow), weapon(None, None, Some(1.5))).is_empty());
+        assert!(weapon_filters(Some(ItemCategory::Bow), weapon(None, None, Some(1.5)), Scaling::printed()).is_empty());
     }
 
     #[test]
@@ -360,6 +494,7 @@ mod tests {
         let got = weapon_filters(
             Some(ItemCategory::Bow),
             weapon(Some(100.0), Some(50.0), Some(2.0)),
+        Scaling::printed(),
         );
 
         let total = got.iter().find(|f| f.id == "item.total_dps").unwrap();
@@ -377,7 +512,7 @@ mod tests {
             (ItemCategory::Bow, weapon(Some(100.0), None, Some(1.5))),
             (ItemCategory::Quiver, weapon(None, Some(100.0), Some(1.5))),
         ] {
-            let got = weapon_filters(Some(category), stats);
+            let got = weapon_filters(Some(category), stats, Scaling::printed());
             let enabled = got.iter().filter(|f| f.enabled).count();
 
             assert_eq!(enabled, 1, "{category:?} {stats:?}");

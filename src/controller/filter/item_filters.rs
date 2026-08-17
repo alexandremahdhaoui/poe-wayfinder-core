@@ -106,9 +106,7 @@ fn apply_type_filters(item: &ParsedItem, options: FilterOptions, out: &mut TypeF
     }
 
     if item.category.is_some_and(ItemCategory::is_gem) {
-        if let Some(quality) = item.quality {
-            out.quality = Range::at_least(f64::from(quality));
-        }
+        crate::controller::filter::presets::apply_gem_filters(item, out);
     }
 }
 

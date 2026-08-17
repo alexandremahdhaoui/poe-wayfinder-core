@@ -4,13 +4,14 @@ use crate::controller::filter::item_filters::{build_query, FilterOptions};
 use crate::controller::filter::presets::{
     gem_level_filter, preset_for, trials_filter, uses_item_properties, uses_modifiers,
 };
+use crate::controller::filter::slots::EmptySlot;
 use crate::controller::filter::stat_filters::{build_stat_filters, StatFilterOptions};
 use crate::controller::parse::{parse_clipboard, ParseError};
 use crate::types::game::GameVersion;
 use crate::types::item::ParsedItem;
 use crate::types::query::TradeQuery;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PriceCheckOptions {
     pub game: GameVersion,
     pub filters: FilterOptions,
@@ -57,13 +58,13 @@ impl PriceCheck {
 pub fn price_check(
     clipboard: &str,
     data: &dyn GameData,
-    options: PriceCheckOptions,
+    options: &PriceCheckOptions,
 ) -> Result<PriceCheck, ParseError> {
     let item = parse_clipboard(clipboard, options.game, data)?;
 
     let mut query = build_query(&item, options.filters);
 
-    let mut stats = options.stats;
+    let mut stats = options.stats.clone();
     stats.facts = crate::controller::filter::rules::ItemFacts {
         is_unique: item.rarity == Some(crate::types::item::ItemRarity::Unique),
         is_modifiable: item.is_modifiable(),
@@ -73,6 +74,39 @@ pub fn price_check(
 
     stats.roll_tolerance = crate::controller::filter::rules::tolerance_for(stats.facts);
 
+    let tweaks = crate::controller::filter::common::final_filter_tweaks(
+        item.category,
+        item.rarity,
+        &item.info.reference_name,
+        crate::controller::filter::slots::empty_slot(&item).is_some(),
+    );
+
+    stats.hide_augments = tweaks.hide_augments;
+    stats.hide_anointment = crate::controller::filter::unique::anointment(&item).is_some()
+        && item.is_modifiable();
+    stats.valuable_rooms = crate::controller::filter::unique::valuable_rooms(&item.atzoatl_rooms)
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    stats.cluster_jewel_rules = tweaks.cluster_jewel_rules;
+
+    if tweaks.flask_rules {
+        let references: Vec<String> = item
+            .modifiers
+            .iter()
+            .flat_map(|modifier| &modifier.stats)
+            .map(|stat| stat.reference.clone())
+            .collect();
+
+        stats.hide_flask_enchants =
+            !crate::controller::filter::slots::flask_enchant_is_useful(&references);
+    }
+
+    if tweaks.show_empty_modifier {
+        query.filters.misc_filters.has_empty_modifier =
+            crate::controller::filter::slots::empty_slot(&item).map(EmptySlot::trade_option);
+    }
+
     let preset = preset_for(&item);
 
     if let Some(range) = gem_level_filter(&item, preset) {
@@ -80,10 +114,16 @@ pub fn price_check(
     }
 
     {
-        use crate::controller::filter::unique::{unique_level_filter, unique_search};
+        use crate::controller::filter::unique::{link_filter, unique_level_filter, unique_search};
 
-        if let Some(range) = unique_level_filter(&item, unique_search(&item)) {
+        let search = unique_search(&item);
+
+        if let Some(range) = unique_level_filter(&item, search) {
             query.filters.type_filters.ilvl = range;
+        }
+
+        if let Some(range) = link_filter(&item, search) {
+            query.filters.misc_filters.gem_sockets = range;
         }
     }
 
@@ -91,12 +131,18 @@ pub fn price_check(
         query.filters.map_filters.map_revives = range;
     }
 
+    if let Some(range) =
+        crate::controller::filter::presets::ascendancy_area_level_filter(&item, preset)
+    {
+        query.filters.misc_filters.area_level = range;
+    }
+
     let mut sources = Vec::new();
 
     if uses_modifiers(preset) {
         let properties = uses_item_properties(preset).then_some(&item);
 
-        let built = build_stat_filters(&item.modifiers, properties, data, stats);
+        let built = build_stat_filters(&item.modifiers, properties, data, &stats);
 
         query.stats.extend(built.and);
         query.stats.extend(built.counts);
@@ -311,7 +357,7 @@ mod tests {
         let got = price_check(
             &ring_text(),
             &data(),
-            PriceCheckOptions::new(GameVersion::Poe2),
+            &PriceCheckOptions::new(GameVersion::Poe2),
         )
         .unwrap();
 
@@ -326,7 +372,7 @@ mod tests {
         let got = price_check(
             &ring_text(),
             &data(),
-            PriceCheckOptions::new(GameVersion::Poe2),
+            &PriceCheckOptions::new(GameVersion::Poe2),
         )
         .unwrap();
 
@@ -338,7 +384,7 @@ mod tests {
         let got = price_check(
             &ring_text(),
             &data(),
-            PriceCheckOptions::new(GameVersion::Poe2),
+            &PriceCheckOptions::new(GameVersion::Poe2),
         )
         .unwrap();
 
@@ -357,7 +403,7 @@ mod tests {
         let got = price_check(
             &ring_text(),
             &data(),
-            PriceCheckOptions::new(GameVersion::Poe2),
+            &PriceCheckOptions::new(GameVersion::Poe2),
         )
         .unwrap();
 
@@ -374,7 +420,7 @@ mod tests {
         let got = price_check(
             &ring_text(),
             &empty,
-            PriceCheckOptions::new(GameVersion::Poe2),
+            &PriceCheckOptions::new(GameVersion::Poe2),
         )
         .unwrap();
 
@@ -387,7 +433,7 @@ mod tests {
         let got = price_check(
             &ring_text(),
             &data(),
-            PriceCheckOptions::new(GameVersion::Poe2),
+            &PriceCheckOptions::new(GameVersion::Poe2),
         )
         .unwrap();
 
@@ -399,7 +445,7 @@ mod tests {
         let got = price_check(
             "hello world",
             &data(),
-            PriceCheckOptions::new(GameVersion::Poe2),
+            &PriceCheckOptions::new(GameVersion::Poe2),
         );
 
         assert_eq!(got.unwrap_err(), ParseError::BadNamePlate);
@@ -410,14 +456,14 @@ mod tests {
         let poe1 = price_check(
             &ring_text(),
             &data(),
-            PriceCheckOptions::new(GameVersion::Poe1),
+            &PriceCheckOptions::new(GameVersion::Poe1),
         )
         .unwrap();
 
         let poe2 = price_check(
             &ring_text(),
             &data(),
-            PriceCheckOptions::new(GameVersion::Poe2),
+            &PriceCheckOptions::new(GameVersion::Poe2),
         )
         .unwrap();
 
@@ -429,7 +475,7 @@ mod tests {
         let mut options = PriceCheckOptions::new(GameVersion::Poe2);
         options.stats.enable_all = true;
 
-        let got = price_check(&ring_text(), &data(), options).unwrap();
+        let got = price_check(&ring_text(), &data(), &options).unwrap();
 
         assert!(got.query.stats[0].filters.iter().all(|f| !f.disabled));
     }
@@ -439,7 +485,7 @@ mod tests {
         let mut options = PriceCheckOptions::new(GameVersion::Poe2);
         options.stats.roll_tolerance = 0.0;
 
-        let got = price_check(&ring_text(), &data(), options).unwrap();
+        let got = price_check(&ring_text(), &data(), &options).unwrap();
 
         let life = got.query.stats[0]
             .filters
@@ -455,7 +501,7 @@ mod tests {
         let got = price_check(
             &ring_text(),
             &data(),
-            PriceCheckOptions::new(GameVersion::Poe2),
+            &PriceCheckOptions::new(GameVersion::Poe2),
         )
         .unwrap();
 
@@ -492,7 +538,7 @@ mod tests {
         let got = price_check(
             &ring_text(),
             &data(),
-            PriceCheckOptions::new(GameVersion::Poe2),
+            &PriceCheckOptions::new(GameVersion::Poe2),
         )
         .expect("the item parses");
 
@@ -504,7 +550,7 @@ mod tests {
         let got = price_check(
             &ring_text(),
             &data(),
-            PriceCheckOptions::new(GameVersion::Poe2),
+            &PriceCheckOptions::new(GameVersion::Poe2),
         )
         .expect("the item parses");
 
@@ -516,7 +562,7 @@ mod tests {
         let got = price_check(
             &currency_text(),
             &data_with_bulk_currency(),
-            PriceCheckOptions::new(GameVersion::Poe2),
+            &PriceCheckOptions::new(GameVersion::Poe2),
         )
         .expect("the item parses");
 
@@ -529,7 +575,7 @@ mod tests {
         let got = price_check(
             &currency_text(),
             &data(),
-            PriceCheckOptions::new(GameVersion::Poe2),
+            &PriceCheckOptions::new(GameVersion::Poe2),
         )
         .expect("the item parses");
 

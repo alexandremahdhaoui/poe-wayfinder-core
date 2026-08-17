@@ -56,6 +56,28 @@ pub fn gem_level_filter(item: &ParsedItem, preset: Preset) -> Option<Range> {
     Some(Range::at_least(f64::from(level)))
 }
 
+pub fn ascendancy_area_level_filter(item: &ParsedItem, preset: Preset) -> Option<Range> {
+    use crate::controller::filter::brackets::{
+        area_level_by_ascendancy_points, ascendancy_points_by_area_level,
+    };
+
+    if preset != Preset::Trials {
+        return None;
+    }
+
+    let area_level = item.area_level?;
+    let name = item.info.reference_name.as_str();
+    let points = ascendancy_points_by_area_level(name, area_level);
+
+    if points == 0 {
+        return None;
+    }
+
+    let floor = area_level_by_ascendancy_points(name, points);
+
+    Some(Range::at_least(f64::from(floor)))
+}
+
 pub fn trials_filter(item: &ParsedItem, preset: Preset) -> Option<Range> {
     if preset != Preset::Trials {
         return None;
@@ -86,6 +108,55 @@ mod tests {
             },
             ..ParsedItem::default()
         }
+    }
+
+    #[test]
+    fn an_ultimatum_is_searched_at_the_area_level_that_grants_the_same_points() {
+        let mut it = item(None);
+
+        it.info.reference_name = "Inscribed Ultimatum".to_string();
+        it.area_level = Some(80);
+
+        let got = ascendancy_area_level_filter(&it, Preset::Trials).expect("a range");
+
+        assert_eq!(
+            got.min,
+            Some(75.0),
+            "level 80 grants three points, and 75 is the lowest level that does"
+        );
+    }
+
+    #[test]
+    fn a_barya_has_its_own_table() {
+        let mut it = item(None);
+
+        it.info.reference_name = "Djinn Barya".to_string();
+        it.area_level = Some(50);
+
+        let got = ascendancy_area_level_filter(&it, Preset::Trials).expect("a range");
+
+        assert_eq!(got.min, Some(45.0), "fifty grants two points, from 45 up");
+    }
+
+    #[test]
+    fn an_item_that_is_not_a_trial_gets_no_area_level_filter() {
+        let mut it = item(None);
+
+        it.area_level = Some(80);
+
+        assert_eq!(
+            ascendancy_area_level_filter(&it, Preset::Modifiers),
+            None
+        );
+    }
+
+    #[test]
+    fn a_trial_with_no_area_level_printed_gets_no_filter() {
+        let mut it = item(None);
+
+        it.info.reference_name = "Inscribed Ultimatum".to_string();
+
+        assert_eq!(ascendancy_area_level_filter(&it, Preset::Trials), None);
     }
 
     #[test]

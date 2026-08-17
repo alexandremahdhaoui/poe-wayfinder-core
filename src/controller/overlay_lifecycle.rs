@@ -264,6 +264,31 @@ impl Lifecycle {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_rectangle_with_no_area_contains_nothing() {
+        let empty = Rect {
+            x: 100,
+            y: 100,
+            width: 0,
+            height: 0,
+        };
+
+        assert!(!empty.contains(Point { x: 100, y: 100 }));
+    }
+
+    #[test]
+    fn a_negative_coordinate_works() {
+        let left = Rect {
+            x: -500,
+            y: 0,
+            width: 200,
+            height: 200,
+        };
+
+        assert!(left.contains(Point { x: -400, y: 100 }));
+        assert!(!left.contains(Point { x: -600, y: 100 }));
+    }
+
     const PANEL: Rect = Rect {
         x: 1000,
         y: 100,
