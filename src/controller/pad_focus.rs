@@ -162,6 +162,10 @@ fn edit(focus: &mut Focus, pressed: u16) -> Vec<PadEdit> {
     out
 }
 
+pub fn marks(connected: bool, focus: Focus, index: usize) -> bool {
+    connected && focus.row == index
+}
+
 pub fn hints(editing: bool) -> &'static str {
     match editing {
         true => "L/R  1     U/D  10     L2/R2  100     Cross or Circle  done",
@@ -475,5 +479,24 @@ mod repeat_tests {
         assert!(hints(false).contains("R1"));
         assert!(hints(false).contains("Cross"));
         assert!(hints(true).contains("L2/R2"));
+    }
+
+    #[test]
+    fn no_pad_means_no_row_is_marked() {
+        let focus = Focus::default();
+
+        assert!(!marks(false, focus, 0));
+        assert!(!marks(false, focus, 1));
+    }
+
+    #[test]
+    fn the_focused_row_is_marked_when_a_pad_is_connected() {
+        let focus = Focus {
+            row: 2,
+            ..Focus::default()
+        };
+
+        assert!(marks(true, focus, 2));
+        assert!(!marks(true, focus, 1));
     }
 }

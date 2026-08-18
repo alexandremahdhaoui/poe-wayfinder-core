@@ -100,15 +100,20 @@ impl EmptySlot {
 pub fn empty_modifier_group(
     item: &ParsedItem,
     data: &dyn crate::adapter::data_adapter::StatLookup,
-) -> Option<crate::types::query::StatGroup> {
+) -> Option<(
+    crate::types::query::StatGroup,
+    crate::controller::filter::stat_filters::FilterSource,
+)> {
+    use crate::controller::filter::stat_filters::FilterSource;
     use crate::types::modifier::ModifierType;
     use crate::types::query::{Range, StatFilter, StatGroup, StatGroupKind};
+    use crate::types::stat::StatRoll;
 
     let slot = empty_slot(item)?;
     let hit = data.stat_by_matcher(slot.pseudo_reference())?;
     let id = hit.stat.trade.ids_for(ModifierType::Pseudo)?.first()?;
 
-    Some(StatGroup {
+    let group = StatGroup {
         kind: StatGroupKind::Count,
         value: Range {
             min: Some(1.0),
@@ -116,7 +121,22 @@ pub fn empty_modifier_group(
         },
         filters: vec![StatFilter::range(id, Range::at_least(1.0))],
         disabled: false,
-    })
+    };
+
+    let source = FilterSource {
+        id: id.clone(),
+        text: slot.pseudo_reference().to_string(),
+        roll: Some(StatRoll {
+            value: 1.0,
+            min: 1.0,
+            max: 1.0,
+            ..StatRoll::default()
+        }),
+        tier: None,
+        contributors: Vec::new(),
+    };
+
+    Some((group, source))
 }
 
 pub fn empty_slot(item: &ParsedItem) -> Option<EmptySlot> {
@@ -552,8 +572,14 @@ mod tests {
             ModifierType::Explicit,
             Some(Generation::Prefix),
         )]);
-        let group = empty_modifier_group(&item, &data).expect("a count group");
+        let (group, source) = empty_modifier_group(&item, &data).expect("a count group");
 
+        assert!(
+            source.text.starts_with("# Empty "),
+            "the row needs readable text or the panel shows a raw trade id: {}",
+            source.text
+        );
+        assert_eq!(source.id, group.filters[0].id);
         assert_eq!(group.kind, StatGroupKind::Count);
         assert_eq!(group.value.min, Some(1.0));
         assert_eq!(group.value.max, Some(1.0));

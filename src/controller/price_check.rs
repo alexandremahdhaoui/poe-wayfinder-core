@@ -109,9 +109,14 @@ pub fn price_check_item(
             !crate::controller::filter::slots::flask_enchant_is_useful(&references);
     }
 
+    let mut empty_modifier_source = None;
+
     if tweaks.show_empty_modifier {
-        if let Some(group) = crate::controller::filter::slots::empty_modifier_group(&item, data) {
+        if let Some((group, source)) =
+            crate::controller::filter::slots::empty_modifier_group(&item, data)
+        {
             query.stats.push(group);
+            empty_modifier_source = Some(source);
         }
     }
 
@@ -145,7 +150,8 @@ pub fn price_check_item(
         query.filters.misc_filters.area_level = range;
     }
 
-    let mut sources = Vec::new();
+    let mut sources: Vec<crate::controller::filter::stat_filters::FilterSource> =
+        empty_modifier_source.into_iter().collect();
 
     if uses_modifiers(preset) {
         let properties = uses_item_properties(preset).then_some(&item);
@@ -154,7 +160,7 @@ pub fn price_check_item(
 
         query.stats.extend(built.and);
         query.stats.extend(built.counts);
-        sources = built.sources;
+        sources.extend(built.sources);
     }
 
     crate::controller::filter::mageblood::apply_legacy_rules(&item, &sources, &mut query);
